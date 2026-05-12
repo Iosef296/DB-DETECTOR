@@ -1,0 +1,2632 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DBDetector — Explorador Visual</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+:root {
+  --bg:            #f5f5f7;
+  --bg-card:       #ffffff;
+  --bg-elevated:   #ffffff;
+  --bg-sidebar:    #fafafa;
+  --border:        #e8e8ed;
+  --border-hover:  #d2d2d7;
+  --fg:            #1d1d1f;
+  --fg-secondary:  #424245;
+  --fg-muted:      #86868b;
+  --fg-dim:        #aeaeb2;
+  --accent:        #007AFF;
+  --accent-hover:  #0066d6;
+  --accent-light:  rgba(0,122,255,0.06);
+  --accent-medium: rgba(0,122,255,0.10);
+  --accent-strong: rgba(0,122,255,0.15);
+  --success:       #34c759;
+  --success-light: rgba(52,199,89,0.08);
+  --warning:       #ff9f0a;
+  --warning-light: rgba(255,159,10,0.08);
+  --danger:        #ff3b30;
+  --danger-light:  rgba(255,59,48,0.08);
+  --purple:        #af52de;
+  --purple-light:  rgba(175,82,222,0.08);
+  --pink:          #ff2d55;
+  --pink-light:    rgba(255,45,85,0.08);
+  --orange:        #ff9500;
+  --orange-light:  rgba(255,149,0,0.08);
+  --teal:          #5ac8fa;
+  --teal-light:    rgba(90,200,250,0.08);
+  --radius:        16px;
+  --radius-sm:     12px;
+  --radius-xs:     8px;
+  --radius-pill:   100px;
+  --shadow-xs:     0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.04), 0 4px 8px rgba(0,0,0,0.02);
+  --shadow-md:     0 2px 8px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.03);
+  --shadow-lg:     0 4px 16px rgba(0,0,0,0.06), 0 16px 48px rgba(0,0,0,0.04);
+  --shadow-xl:     0 8px 32px rgba(0,0,0,0.08), 0 24px 64px rgba(0,0,0,0.06);
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Pantallas ──────────────────────────────────────────── */
+.screen { display: none; position: relative; z-index: 1; min-height: 100vh; }
+.screen.active { display: flex; }
+
+/* ══ PANTALLA 1: BIENVENIDA ══════════════════════════════ */
+#screen-welcome {
+  flex-direction: column; align-items: center;
+  justify-content: center; gap: 32px; padding: 40px 24px;
+}
+
+.welcome-orb {
+  position: fixed; border-radius: 50%; pointer-events: none; z-index: 0;
+}
+.welcome-orb-1 {
+  top: -180px; right: -120px; width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(0,122,255,0.06) 0%, transparent 70%);
+}
+.welcome-orb-2 {
+  bottom: -200px; left: -150px; width: 600px; height: 600px;
+  background: radial-gradient(circle, rgba(175,82,222,0.04) 0%, transparent 70%);
+}
+
+.logo-container {
+  display: flex; align-items: center; gap: 14px;
+  animation: fadeUp 0.7s cubic-bezier(0.16,1,0.3,1); position: relative;
+}
+.logo-icon {
+  width: 52px; height: 52px; background: var(--accent);
+  border-radius: 14px; display: flex; align-items: center;
+  justify-content: center; font-size: 22px; color: white;
+  box-shadow: 0 4px 16px rgba(0,122,255,0.25);
+}
+.logo-text { font-size: 32px; font-weight: 800; letter-spacing: -0.5px; }
+.logo-text span { color: var(--accent); }
+
+.welcome-card {
+  background: var(--bg-card); border-radius: 24px;
+  padding: 44px 40px; box-shadow: var(--shadow-lg);
+  max-width: 560px; width: 100%;
+  animation: fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.1s both; position: relative;
+}
+.welcome-card h2 {
+  font-size: 26px; font-weight: 700; letter-spacing: -0.3px;
+  margin-bottom: 8px; line-height: 1.2;
+}
+.welcome-card > p {
+  color: var(--fg-muted); font-size: 15px; line-height: 1.6; margin-bottom: 28px;
+}
+
+.input-label {
+  display: block; font-size: 13px; font-weight: 600;
+  color: var(--fg-secondary); margin-bottom: 8px;
+}
+.input-wrapper {
+  display: flex; background: var(--bg);
+  border: 1.5px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; transition: border-color 0.25s, box-shadow 0.25s;
+}
+.input-wrapper:focus-within {
+  border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-light);
+}
+.input-icon {
+  display: flex; align-items: center; padding: 0 16px;
+  color: var(--fg-dim); font-size: 16px;
+}
+.input-field {
+  flex: 1; padding: 14px 12px; background: transparent; border: none;
+  color: var(--fg); font-family: 'Inter', sans-serif; font-size: 14px; outline: none;
+}
+.input-field::placeholder { color: var(--fg-dim); }
+.btn-primary {
+  padding: 14px 22px; background: var(--accent); color: white; border: none;
+  font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 600;
+  cursor: pointer; display: flex; align-items: center; gap: 8px;
+  transition: background 0.2s, transform 0.1s; white-space: nowrap;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:active { transform: scale(0.98); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.examples-section {
+  margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border);
+}
+.examples-label {
+  font-size: 12px; font-weight: 500; color: var(--fg-dim);
+  margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.example-btn {
+  display: block; width: 100%; background: none;
+  border: 1px dashed var(--border); border-radius: var(--radius-xs);
+  padding: 9px 14px; color: var(--fg-muted);
+  font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 12px;
+  cursor: pointer; text-align: left; transition: all 0.2s; margin-bottom: 6px;
+}
+.example-btn:last-child { margin-bottom: 0; }
+.example-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+
+.supported-pills {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+  animation: fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.2s both; position: relative;
+}
+.pill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 16px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  font-size: 13px; font-weight: 500; color: var(--fg-muted);
+  box-shadow: var(--shadow-xs);
+}
+
+/* ── Cloud form (oculto) ──────────────────────────────── */
+.cloud-card {
+  background: var(--bg-card); border-radius: var(--radius);
+  padding: 24px; box-shadow: var(--shadow-md);
+  display: flex; flex-direction: column; gap: 18px;
+  max-width: 560px; width: 100%;
+}
+.cloud-form-title {
+  font-size: 13px; font-weight: 600; color: var(--fg-muted);
+  display: flex; align-items: center; gap: 8px;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.cloud-label {
+  font-size: 12px; color: var(--fg-muted); margin-bottom: 8px;
+  display: block; font-weight: 500; text-transform: uppercase; letter-spacing: .05em;
+}
+.cloud-field-group { display: flex; flex-direction: column; }
+.db-type-selector { display: flex; gap: 8px; flex-wrap: wrap; }
+.db-type-btn {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 14px; border-radius: var(--radius-xs);
+  border: 1.5px solid var(--border); background: var(--bg);
+  color: var(--fg-muted); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+}
+.db-type-btn:hover { border-color: var(--border-hover); color: var(--fg-secondary); }
+.db-type-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.cloud-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cloud-grid.cols3 { grid-template-columns: 2fr 1fr; }
+.cloud-input-group { display: flex; flex-direction: column; gap: 5px; }
+.cloud-input-group.span2 { grid-column: 1/-1; }
+.cloud-input-group label { font-size: 11px; color: var(--fg-dim); font-weight: 500; }
+.cloud-input {
+  padding: 10px 13px; background: var(--bg);
+  border: 1.5px solid var(--border); border-radius: var(--radius-xs);
+  color: var(--fg); font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 13px;
+  outline: none; width: 100%; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.cloud-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.cloud-input::placeholder { color: var(--fg-dim); font-family: 'Inter', sans-serif; }
+.cloud-provider-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.provider-btn {
+  padding: 5px 12px; border-radius: var(--radius-pill);
+  border: 1px dashed var(--border); background: transparent;
+  color: var(--fg-dim); font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s; font-family: 'Inter', sans-serif;
+}
+.provider-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.btn-auto-detect {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 16px; background: transparent;
+  border: 1.5px dashed var(--accent); border-radius: var(--radius-xs);
+  color: var(--accent); font-family: 'Inter', sans-serif;
+  font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+}
+.btn-auto-detect:hover { background: var(--accent-light); }
+.btn-auto-detect:disabled { opacity: 0.5; cursor: not-allowed; }
+.platform-card {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.platform-card-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.platform-tag { margin-left: auto; font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); font-weight: 500; }
+.platform-tag.ok   { color: var(--success); background: var(--success-light); }
+.platform-tag.warn { color: var(--warning); background: var(--warning-light); }
+.platform-project {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-xs); transition: all 0.2s;
+}
+.platform-project:hover { border-color: var(--border-hover); box-shadow: var(--shadow-sm); }
+.platform-project-name { font-size: 13px; font-weight: 500; }
+.platform-project-host { font-size: 11px; color: var(--fg-dim); font-family: 'SF Mono', monospace; }
+.install-hint {
+  padding: 10px 14px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-xs);
+  font-size: 12px; color: var(--fg-muted); line-height: 1.6;
+}
+.install-hint code {
+  font-family: 'SF Mono', 'JetBrains Mono', monospace; color: var(--accent);
+  background: var(--accent-light); padding: 2px 7px; border-radius: 4px;
+}
+
+/* ══ PANTALLA 2: ESCANEANDO ══════════════════════════════ */
+#screen-scanning {
+  flex-direction: column; align-items: center;
+  justify-content: center; gap: 44px; padding: 40px 24px;
+}
+.scan-animation { position: relative; width: 120px; height: 120px; }
+.scan-ring-outer {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 1s linear infinite;
+}
+.scan-ring-inner {
+  position: absolute; inset: 12px; border-radius: 50%;
+  border: 2px solid var(--border);
+  border-bottom-color: var(--purple);
+  animation: spin 1.5s linear infinite reverse;
+}
+.scan-center-icon {
+  position: absolute; inset: 28px; border-radius: 50%;
+  background: var(--accent-light);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; color: var(--accent);
+}
+.scan-status { text-align: center; }
+.scan-status h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+.scan-status p { color: var(--fg-muted); font-size: 13px; font-family: 'SF Mono', 'JetBrains Mono', monospace; }
+.scan-steps { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 380px; }
+.scan-step {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  opacity: 0.35; transition: all 0.5s cubic-bezier(0.16,1,0.3,1);
+  box-shadow: var(--shadow-xs);
+}
+.scan-step.active {
+  opacity: 1; border-color: var(--accent);
+  background: var(--accent-light); box-shadow: var(--shadow-sm);
+}
+.scan-step.done { opacity: 0.7; border-color: var(--border); }
+.scan-step .step-icon {
+  width: 32px; height: 32px; border-radius: 50%; display: flex;
+  align-items: center; justify-content: center; font-size: 13px;
+  background: var(--bg); color: var(--fg-dim); flex-shrink: 0; transition: all 0.3s;
+}
+.scan-step.active .step-icon { background: var(--accent); color: white; box-shadow: 0 2px 8px rgba(0,122,255,0.3); }
+.scan-step.done   .step-icon { background: var(--success); color: white; }
+.scan-step .step-text   { font-size: 14px; font-weight: 500; }
+.scan-step .step-detail { font-size: 12px; color: var(--fg-dim); margin-top: 2px; }
+
+/* ══ PANTALLA 3: DASHBOARD ═══════════════════════════════ */
+#screen-dashboard { flex-direction: column; height: 100vh; overflow: hidden; }
+
+.dash-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px;
+  background: rgba(255,255,255,0.85); backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100; flex-shrink: 0;
+}
+.dash-header-left { display: flex; align-items: center; gap: 14px; }
+.dash-logo { display: flex; align-items: center; gap: 10px; }
+.dash-logo-icon {
+  width: 32px; height: 32px; background: var(--accent); border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: white;
+}
+.dash-logo-text { font-size: 18px; font-weight: 800; }
+.dash-logo-text span { color: var(--accent); }
+.dash-sep { width: 1px; height: 24px; background: var(--border); }
+.db-badge {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 14px; background: var(--success-light);
+  border: 1px solid rgba(52,199,89,0.15); border-radius: var(--radius-pill); font-size: 13px;
+}
+.db-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.db-badge .engine { font-weight: 600; color: var(--success); }
+.db-badge .dbname { color: var(--fg-muted); }
+.dash-header-right { display: flex; align-items: center; gap: 6px; }
+.btn-view {
+  padding: 7px 14px; background: transparent; border: none;
+  border-radius: var(--radius-pill); color: var(--fg-muted);
+  font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+  cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+}
+.btn-view:hover  { background: var(--bg); color: var(--fg-secondary); }
+.btn-view.active { background: var(--accent-light); color: var(--accent); }
+.btn-secondary {
+  padding: 7px 14px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  color: var(--fg-muted); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+  cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+}
+.btn-secondary:hover { border-color: var(--border-hover); color: var(--fg-secondary); }
+
+.stats-bar {
+  display: flex; padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card); overflow-x: auto; flex-shrink: 0;
+}
+.stat-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 24px; border-right: 1px solid var(--border); flex-shrink: 0;
+}
+.stat-item:last-child { border-right: none; }
+.stat-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+}
+.stat-icon.blue   { background: rgba(0,122,255,0.08); color: var(--accent); }
+.stat-icon.green  { background: var(--success-light);  color: var(--success); }
+.stat-icon.orange { background: var(--orange-light);   color: var(--orange); }
+.stat-icon.pink   { background: var(--pink-light);     color: var(--pink); }
+.stat-icon.purple { background: var(--purple-light);   color: var(--purple); }
+.stat-value { font-size: 22px; font-weight: 700; line-height: 1; }
+.stat-label { font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 3px; font-weight: 500; }
+
+.dash-content { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+
+.dash-sidebar {
+  width: 272px; background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden;
+}
+.sidebar-search { padding: 14px 14px 8px; }
+.sidebar-search input {
+  width: 100%; padding: 9px 14px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-xs);
+  color: var(--fg); font-family: 'Inter', sans-serif; font-size: 13px;
+  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sidebar-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.sidebar-search input::placeholder { color: var(--fg-dim); }
+.sidebar-title {
+  padding: 6px 16px 8px; font-size: 11px; font-weight: 600;
+  color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.5px;
+}
+.sidebar-list { overflow-y: auto; flex: 1; padding-bottom: 8px; }
+.sidebar-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px 9px 16px; cursor: pointer;
+  transition: all 0.15s; border-left: 3px solid transparent;
+}
+.sidebar-item:hover  { background: rgba(0,0,0,0.02); }
+.sidebar-item.active { background: var(--accent-light); border-left-color: var(--accent); }
+.sidebar-item-icon {
+  width: 30px; height: 30px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; flex-shrink: 0;
+}
+.sidebar-item-name { font-size: 13px; font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-item-count {
+  font-size: 11px; color: var(--fg-dim); background: var(--bg);
+  padding: 2px 8px; border-radius: var(--radius-pill); font-weight: 500;
+}
+
+.dash-main { flex: 1; overflow-y: auto; padding: 28px 32px; }
+
+/* ── Vista: header ─────────────────────────────────────── */
+.view-header { margin-bottom: 28px; }
+.view-header-row { display: flex; align-items: center; gap: 16px; }
+.view-header-icon {
+  width: 48px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0;
+}
+.view-header-name { font-size: 26px; font-weight: 800; letter-spacing: -0.3px; }
+.view-header-desc { font-size: 14px; color: var(--fg-muted); margin-top: 3px; }
+.view-header-actions { display: flex; gap: 8px; margin-top: 16px; }
+.btn-action {
+  padding: 8px 16px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  color: var(--fg-muted); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+  cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s;
+}
+.btn-action:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+
+.section-label {
+  font-size: 12px; font-weight: 600; color: var(--fg-dim);
+  margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.4px;
+}
+
+/* ── Vista: columnas ───────────────────────────────────── */
+.columns-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px; margin-bottom: 32px;
+}
+.col-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 16px;
+  transition: all 0.2s; position: relative;
+}
+.col-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.col-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.col-card-name {
+  font-size: 14px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+}
+.k     { font-size: 10px; }
+.k.pk  { color: var(--warning); }
+.k.fk  { color: var(--accent); }
+.k.uq  { color: var(--purple); }
+
+.type-tag { padding: 3px 10px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 600; font-family: 'SF Mono', 'JetBrains Mono', monospace; }
+.tt-int     { background: rgba(0,122,255,0.08);  color: var(--accent); }
+.tt-varchar { background: var(--success-light);  color: var(--success); }
+.tt-text    { background: var(--purple-light);   color: var(--purple); }
+.tt-bool    { background: var(--orange-light);   color: var(--orange); }
+.tt-date    { background: var(--pink-light);     color: var(--pink); }
+.tt-float   { background: var(--teal-light);     color: var(--teal); }
+.tt-other   { background: rgba(0,0,0,0.04);      color: var(--fg-muted); }
+
+.col-card-meta { display: flex; gap: 16px; font-size: 12px; color: var(--fg-dim); }
+.col-card-meta span { display: flex; align-items: center; gap: 4px; }
+
+/* ── Vista: relaciones ─────────────────────────────────── */
+.rel-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 32px; }
+.rel-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); transition: all 0.2s;
+}
+.rel-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-sm); }
+.rel-end { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.rel-end-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; flex-shrink: 0;
+}
+.rel-end-table { font-size: 13px; font-weight: 600; }
+.rel-end-col   { font-size: 11px; color: var(--fg-dim); font-family: 'SF Mono', monospace; }
+.rel-arrow { display: flex; align-items: center; gap: 6px; color: var(--accent); flex-shrink: 0; }
+.rel-badge {
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  font-size: 11px; font-weight: 600;
+  background: var(--accent-light); color: var(--accent);
+}
+
+/* ── Vista: datos ──────────────────────────────────────── */
+.data-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.search-box {
+  flex: 1; min-width: 200px; max-width: 320px;
+  padding: 9px 14px; padding-left: 36px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-xs); color: var(--fg);
+  font-family: 'Inter', sans-serif; font-size: 13px; outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23aeaeb2' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: 12px center;
+}
+.search-box:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.search-box::placeholder { color: var(--fg-dim); }
+.data-meta { font-size: 12px; color: var(--fg-muted); margin-left: auto; }
+
+.data-table-wrap {
+  overflow-x: auto; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+table.data-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data-tbl th {
+  padding: 11px 16px; text-align: left; font-weight: 600; font-size: 11px;
+  color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.3px;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; white-space: nowrap; cursor: pointer; user-select: none; transition: color .15s;
+}
+table.data-tbl th:hover { color: var(--fg-secondary); }
+table.data-tbl th.sort-asc,
+table.data-tbl th.sort-desc { color: var(--accent); }
+table.data-tbl th .th-inner { display: flex; align-items: center; gap: 5px; }
+table.data-tbl th .sort-arr { opacity: .3; transition: opacity .2s; font-size: 9px; margin-left: auto; }
+table.data-tbl th.sort-asc .sort-arr,
+table.data-tbl th.sort-desc .sort-arr { opacity: 1; color: var(--accent); }
+table.data-tbl th.th-rn { width: 44px; cursor: default; }
+table.data-tbl th.th-rn:hover { color: var(--fg-muted); }
+table.data-tbl td {
+  padding: 10px 16px; border-bottom: 1px solid rgba(0,0,0,0.03);
+  font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 12px;
+  white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+  color: var(--fg-secondary);
+}
+table.data-tbl tr:last-child td { border-bottom: none; }
+table.data-tbl tr:hover td { background: var(--accent-light); }
+table.data-tbl td.td-rn {
+  color: var(--fg-dim); text-align: center; font-size: 11px;
+  background: var(--bg); border-right: 1px solid var(--border);
+  width: 44px; user-select: none;
+}
+table.data-tbl td.null-val { color: var(--fg-dim); font-style: italic; }
+table.data-tbl td.bool-t   { color: var(--success); font-weight: 600; }
+table.data-tbl td.bool-f   { color: var(--danger);  font-weight: 600; }
+table.data-tbl td.num-val  { color: var(--accent);  text-align: right; }
+table.data-tbl td.date-val { color: var(--purple); }
+table.data-tbl td.long-val { cursor: pointer; }
+table.data-tbl td.long-val:hover { color: var(--accent); }
+
+.data-pagination {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--fg-muted);
+  background: var(--bg); border-radius: 0 0 var(--radius) var(--radius);
+}
+.pag-btns { display: flex; gap: 6px; }
+.pag-btn {
+  padding: 5px 14px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  color: var(--fg-muted); font-family: 'Inter', sans-serif; font-size: 12px;
+  cursor: pointer; transition: all 0.2s;
+}
+.pag-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pag-btn:disabled { opacity: .3; cursor: not-allowed; }
+
+/* SQL panel */
+.sql-panel {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); margin-bottom: 16px; display: none;
+  box-shadow: var(--shadow-sm);
+}
+.sql-panel.show { display: block; }
+.sql-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 600; color: var(--fg-muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sql-editor {
+  width: 100%; padding: 14px 16px; background: transparent; border: none;
+  color: var(--fg); font-family: 'SF Mono', 'JetBrains Mono', monospace; font-size: 13px;
+  outline: none; resize: vertical; min-height: 70px; max-height: 140px; line-height: 1.5;
+}
+.sql-footer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; border-top: 1px solid var(--border);
+}
+.btn-run {
+  padding: 7px 18px; background: var(--accent); color: white;
+  border: none; border-radius: var(--radius-xs);
+  font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.2s;
+}
+.btn-run:hover { background: var(--accent-hover); }
+.sql-hint { font-size: 11px; color: var(--fg-dim); font-family: 'SF Mono', monospace; }
+
+/* ── Vista: ER diagram ─────────────────────────────────── */
+.er-container {
+  position: relative; width: 100%; min-height: 560px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.er-canvas { position: absolute; inset: 0; }
+.er-box {
+  position: absolute; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  min-width: 190px; cursor: grab; transition: box-shadow 0.2s, border-color 0.2s;
+  z-index: 10; user-select: none; box-shadow: var(--shadow-sm);
+}
+.er-box:hover, .er-box.dragging {
+  border-color: var(--accent); box-shadow: var(--shadow-lg); z-index: 20;
+}
+.er-box-head {
+  padding: 10px 14px; background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  font-size: 13px; font-weight: 700;
+  display: flex; align-items: center; gap: 8px;
+}
+.er-box-col {
+  padding: 5px 14px; font-size: 11px;
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid rgba(0,0,0,0.03);
+  font-family: 'SF Mono', 'JetBrains Mono', monospace;
+  color: var(--fg-secondary);
+}
+.er-box-col:last-child { border-bottom: none; }
+.er-box-col .ect { color: var(--fg-dim); font-size: 10px; margin-left: auto; }
+.er-box-col .eck { color: var(--warning); font-size: 10px; }
+.er-box-col.is-pk { color: var(--fg); font-weight: 600; }
+.er-svg { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+
+/* Estado vacío */
+.empty-view {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; min-height: 300px; gap: 12px; color: var(--fg-dim);
+}
+.empty-view i { font-size: 36px; color: var(--border-hover); }
+.empty-view p { font-size: 14px; }
+
+/* Toasts */
+.toast-wrap { position: fixed; top: 16px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  padding: 12px 18px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 13px; display: flex; align-items: center; gap: 10px;
+  box-shadow: var(--shadow-lg); animation: toastIn .35s cubic-bezier(0.16,1,0.3,1); max-width: 340px;
+}
+.toast.success { border-left: 3px solid var(--success); }
+.toast.error   { border-left: 3px solid var(--danger); }
+.toast.info    { border-left: 3px solid var(--accent); }
+.toast.out     { animation: toastOut .25s ease forwards; }
+
+/* Spinner */
+.spin {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,.3); border-top-color: white;
+  border-radius: 50%; animation: spin .5s linear infinite;
+}
+.spin.dark { border-color: rgba(0,0,0,.1); border-top-color: var(--accent); }
+
+/* Animaciones */
+@keyframes fadeUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+@keyframes spin   { to { transform:rotate(360deg); } }
+@keyframes toastIn  { from { opacity:0; transform:translateX(30px) scale(.95); } to { opacity:1; transform:none; } }
+@keyframes toastOut { to   { opacity:0; transform:translateX(30px) scale(.95); } }
+@keyframes cardIn   { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+
+.card-in { animation: cardIn .35s cubic-bezier(0.16,1,0.3,1) both; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+
+/* ── Modo edición ───────────────────────────────────────── */
+.btn-edit-mode {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-xs);
+  border: 1.5px solid var(--border); background: transparent;
+  font-size: 13px; font-weight: 500; color: var(--fg-muted);
+  cursor: pointer; transition: all .15s;
+}
+.btn-edit-mode:hover { border-color: var(--warning); color: var(--warning); background: var(--warning-light); }
+.btn-edit-mode.active { border-color: var(--warning); color: var(--warning); background: var(--warning-light); }
+.edit-mode-badge {
+  display: none; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: var(--radius-pill);
+  background: var(--warning-light); border: 1px solid rgba(255,159,10,.2);
+  font-size: 12px; font-weight: 600; color: var(--warning);
+}
+.edit-mode-badge.visible { display: flex; }
+.edit-mode-badge .badge-dot { width:6px; height:6px; border-radius:50%; background:var(--warning); }
+.td-actions { width: 72px; text-align: center; padding: 4px 6px !important; white-space: nowrap; }
+.row-btn {
+  width: 28px; height: 28px; border-radius: 6px; border: none;
+  cursor: pointer; font-size: 12px; transition: background .12s;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.row-btn-edit   { background: var(--accent-light);  color: var(--accent); }
+.row-btn-edit:hover   { background: var(--accent-medium); }
+.row-btn-del    { background: var(--danger-light);   color: var(--danger); }
+.row-btn-del:hover    { background: rgba(255,59,48,.15); }
+.row-btn-save   { background: var(--success-light);  color: var(--success); }
+.row-btn-save:hover   { background: rgba(52,199,89,.15); }
+.row-btn-cancel { background: var(--bg);             color: var(--fg-muted); border: 1px solid var(--border); }
+.row-btn-cancel:hover { background: var(--bg-elevated); }
+td.editing input {
+  width: 100%; min-width: 60px; padding: 3px 7px;
+  border: 1.5px solid var(--accent); border-radius: 5px;
+  font-size: 13px; font-family: inherit; background: var(--accent-light);
+  outline: none; color: var(--fg);
+}
+td.editing input:focus { background: #fff; }
+.add-row-bar {
+  display: flex; align-items: center; justify-content: center;
+  padding: 10px; border-top: 1px dashed var(--border);
+}
+.btn-add-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 18px; border-radius: var(--radius-xs);
+  border: 1.5px dashed var(--success); background: var(--success-light);
+  color: var(--success); font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: all .15s;
+}
+.btn-add-row:hover { background: rgba(52,199,89,.14); }
+tr.new-row td { background: rgba(52,199,89,.04); }
+
+/* ── Modal de instalación ───────────────────────────────── */
+.modal-overlay {
+  display: none; position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,0.45); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center; padding: 24px;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: var(--bg-card); border-radius: 20px;
+  box-shadow: var(--shadow-xl); max-width: 560px; width: 100%;
+  padding: 32px; animation: fadeUp .3s cubic-bezier(0.16,1,0.3,1);
+  max-height: 90vh; overflow-y: auto;
+}
+.modal-icon {
+  width: 48px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; margin-bottom: 16px;
+}
+.modal-icon.driver { background: var(--accent-light); color: var(--accent); }
+.modal-icon.server { background: var(--warning-light); color: var(--warning); }
+.modal-title { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+.modal-desc  { font-size: 14px; color: var(--fg-secondary); margin-bottom: 20px; line-height: 1.5; }
+.platform-tabs {
+  display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.platform-tab {
+  padding: 7px 14px; border-radius: var(--radius-xs);
+  border: 1.5px solid var(--border); background: transparent;
+  font-size: 13px; font-weight: 500; color: var(--fg-muted);
+  cursor: pointer; transition: all .15s; display: flex; align-items: center; gap: 6px;
+}
+.platform-tab:hover { border-color: var(--border-hover); color: var(--fg-secondary); }
+.platform-tab.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.platform-panel { display: none; }
+.platform-panel.active { display: block; }
+.modal-cmd-block {
+  background: #1e1e2e; border-radius: var(--radius-xs);
+  padding: 12px 16px; margin-bottom: 10px; position: relative;
+}
+.modal-cmd-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: #888; margin-bottom: 6px;
+}
+.modal-cmd-code { font-family: 'SF Mono', monospace; font-size: 12px; color: #cdd6f4; word-break: break-all; white-space: pre-wrap; }
+.modal-copy-btn {
+  position: absolute; top: 10px; right: 10px;
+  background: rgba(255,255,255,0.08); border: none; border-radius: 6px;
+  color: #888; font-size: 12px; padding: 4px 8px; cursor: pointer;
+  transition: background .15s;
+}
+.modal-copy-btn:hover { background: rgba(255,255,255,0.16); color: #cdd6f4; }
+.modal-note {
+  font-size: 12px; color: var(--fg-muted); padding: 10px 14px;
+  background: var(--bg); border-radius: var(--radius-xs);
+  border: 1px solid var(--border); margin-top: 4px; line-height: 1.6;
+}
+.modal-note a { color: var(--accent); text-decoration: none; }
+.modal-note a:hover { text-decoration: underline; }
+.modal-actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+.modal-btn-primary {
+  flex: 1; min-width: 140px; padding: 11px 18px; border-radius: var(--radius-xs);
+  background: var(--accent); color: #fff; border: none; font-weight: 600;
+  font-size: 14px; cursor: pointer; transition: background .15s;
+}
+.modal-btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.modal-btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.modal-btn-secondary {
+  padding: 11px 18px; border-radius: var(--radius-xs); border: 1.5px solid var(--border);
+  background: transparent; color: var(--fg-secondary); font-size: 14px; font-weight: 500;
+  cursor: pointer; transition: border-color .15s;
+}
+.modal-btn-secondary:hover { border-color: var(--border-hover); }
+.modal-progress {
+  margin-top: 14px; font-size: 13px; color: var(--fg-muted);
+  display: none; align-items: center; gap: 8px;
+}
+.modal-progress.visible { display: flex; }
+.modal-spinner {
+  width: 16px; height: 16px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin .7s linear infinite; flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .dash-sidebar { display: none; }
+  .dash-main { padding: 20px 16px; }
+  .columns-grid { grid-template-columns: 1fr; }
+  .welcome-card { padding: 32px 24px; }
+  .dash-header { padding: 10px 14px; }
+}
+</style>
+</head>
+<body>
+
+<div class="welcome-orb welcome-orb-1"></div>
+<div class="welcome-orb welcome-orb-2"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- ══ PANTALLA 1: BIENVENIDA ══ -->
+<div class="screen active" id="screen-welcome">
+  <div class="logo-container">
+    <div class="logo-icon"><i class="fas fa-database"></i></div>
+    <div class="logo-text">DB<span>Detector</span></div>
+  </div>
+
+  <div class="welcome-card">
+    <h2>Explora tu base de datos visualmente</h2>
+    <p>Ingresa la ruta de tu proyecto y DBDetector detectará la base de datos automáticamente, se conectará y mostrará todas las tablas de forma clara.</p>
+
+    <label class="input-label" for="pathInput">Ruta del proyecto</label>
+    <div class="input-wrapper">
+      <div class="input-icon"><i class="fas fa-folder-open"></i></div>
+      <input class="input-field" id="pathInput" type="text"
+             placeholder="/home/usuario/mi-proyecto"
+             onkeydown="if(event.key==='Enter')startScan()">
+      <button class="btn-primary" id="btnScan" onclick="startScan()" disabled>
+        <span id="scanSpinner" class="spin" style="display:none"></span>
+        <i class="fas fa-magnifying-glass" id="scanIcon"></i>
+        Escanear
+      </button>
+    </div>
+
+    <div class="examples-section">
+      <div class="examples-label">Rutas recientes</div>
+      <button class="example-btn" onclick="fillPath(this.dataset.path)"
+              data-path="/home/iosef/SISTEMAS/ACADEMIA">/home/iosef/SISTEMAS/ACADEMIA</button>
+      <button class="example-btn" onclick="fillPath(this.dataset.path)"
+              data-path="/home/iosef/SISTEMAS/colegioemanuel">/home/iosef/SISTEMAS/colegioemanuel</button>
+    </div>
+  </div>
+
+  <!-- Cloud form (oculto) -->
+  <div id="cloudSection" style="display:none;width:100%;max-width:560px">
+    <div class="cloud-card">
+      <div class="cloud-form-title"><i class="fas fa-server"></i> Conexión directa al servidor</div>
+      <button class="btn-auto-detect" onclick="discoverCloud()" id="btnAutoDetect">
+        <i class="fas fa-satellite-dish"></i> Detectar plataforma automáticamente (Supabase / Fly.io)
+        <span id="autoDetectSpin" class="spin dark" style="display:none;margin-left:auto"></span>
+      </button>
+      <div id="cloudDiscoverResult" style="display:none"></div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+        <span style="font-size:11px;color:var(--fg-dim);white-space:nowrap">o conecta manualmente</span>
+        <div style="flex:1;height:1px;background:var(--border)"></div>
+      </div>
+      <div class="cloud-field-group">
+        <label class="cloud-label">Tipo de base de datos</label>
+        <div class="db-type-selector" id="dbTypeSelector">
+          <div class="db-type-btn active" data-type="postgresql" onclick="selectDbType('postgresql')">🐘 PostgreSQL</div>
+          <div class="db-type-btn" data-type="mysql"      onclick="selectDbType('mysql')">🐬 MySQL</div>
+          <div class="db-type-btn" data-type="mongodb"    onclick="selectDbType('mongodb')">🍃 MongoDB</div>
+          <div class="db-type-btn" data-type="redis"      onclick="selectDbType('redis')">⚡ Redis</div>
+          <div class="db-type-btn" data-type="sqlite"     onclick="selectDbType('sqlite')">🗂️ SQLite</div>
+        </div>
+      </div>
+      <div id="cloudFields"></div>
+      <div class="cloud-examples" id="cloudExamples"></div>
+      <button class="btn-primary" id="btnCloudConnect" onclick="connectCloud()"
+              style="width:100%;justify-content:center;border-radius:var(--radius-xs);margin-top:4px">
+        <span id="cloudConnSpinner" class="spin" style="display:none"></span>
+        <i class="fas fa-plug" id="cloudConnIcon"></i>
+        Conectar
+      </button>
+    </div>
+  </div>
+
+  <div class="supported-pills">
+    <div class="pill"><i class="fas fa-database" style="color:#336791"></i> PostgreSQL</div>
+    <div class="pill"><i class="fas fa-database" style="color:#00758f"></i> MySQL</div>
+    <div class="pill"><i class="fas fa-database" style="color:#003b57"></i> SQLite</div>
+    <div class="pill"><i class="fas fa-database" style="color:#47a248"></i> MongoDB</div>
+    <div class="pill"><i class="fas fa-database" style="color:#dc382d"></i> Redis</div>
+  </div>
+</div>
+
+<!-- ══ PANTALLA 2: ESCANEANDO ══ -->
+<div class="screen" id="screen-scanning">
+  <div class="scan-animation">
+    <div class="scan-ring-outer"></div>
+    <div class="scan-ring-inner"></div>
+    <div class="scan-center-icon"><i class="fas fa-database"></i></div>
+  </div>
+  <div class="scan-status">
+    <h2 id="scanTitle">Escaneando proyecto…</h2>
+    <p  id="scanDetail">Analizando estructura de archivos</p>
+  </div>
+  <div class="scan-steps">
+    <div class="scan-step" id="ss1">
+      <div class="step-icon"><i class="fas fa-folder-tree"></i></div>
+      <div><div class="step-text">Leer estructura del proyecto</div><div class="step-detail">Buscando archivos de configuración</div></div>
+    </div>
+    <div class="scan-step" id="ss2">
+      <div class="step-icon"><i class="fas fa-magnifying-glass"></i></div>
+      <div><div class="step-text">Detectar base de datos</div><div class="step-detail">Analizando dependencias y config</div></div>
+    </div>
+    <div class="scan-step" id="ss3">
+      <div class="step-icon"><i class="fas fa-plug"></i></div>
+      <div><div class="step-text">Conectar a la base de datos</div><div class="step-detail">Estableciendo conexión segura</div></div>
+    </div>
+    <div class="scan-step" id="ss4">
+      <div class="step-icon"><i class="fas fa-table-columns"></i></div>
+      <div><div class="step-text">Extraer tablas y columnas</div><div class="step-detail">Leyendo estructura completa</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PANTALLA 3: DASHBOARD ══ -->
+<div class="screen" id="screen-dashboard">
+
+  <header class="dash-header">
+    <div class="dash-header-left">
+      <div class="dash-logo">
+        <div class="dash-logo-icon"><i class="fas fa-database"></i></div>
+        <div class="dash-logo-text">DB<span>Detector</span></div>
+      </div>
+      <div class="dash-sep"></div>
+      <div class="db-badge">
+        <div class="db-dot"></div>
+        <span class="engine" id="dbBadgeName">PostgreSQL</span>
+        <span class="dbname" id="dbBadgeDb">— mi_base</span>
+      </div>
+    </div>
+    <div class="dash-header-right">
+      <div class="edit-mode-badge" id="editModeBadge"><div class="badge-dot"></div> Modo edición</div>
+      <button class="btn-edit-mode" id="btnEditMode" onclick="toggleEditMode()" title="Activar modo edición"><i class="fas fa-pen-to-square"></i> Editar</button>
+      <div style="width:1px;height:20px;background:var(--border);margin:0 2px"></div>
+      <button class="btn-view"        id="btnViewCols" onclick="setView('cols')"><i class="fas fa-table-columns"></i> Columnas</button>
+      <button class="btn-view active" id="btnViewData" onclick="setView('data')"><i class="fas fa-table-list"></i> Datos</button>
+      <button class="btn-view"        id="btnViewEr"   onclick="setView('er')"  ><i class="fas fa-diagram-project"></i> Diagrama</button>
+      <button class="btn-secondary"                    onclick="goBack()"><i class="fas fa-arrow-left"></i> Nuevo</button>
+    </div>
+  </header>
+
+  <div class="stats-bar" id="statsBar"></div>
+
+  <div class="dash-content">
+    <aside class="dash-sidebar">
+      <div class="sidebar-search">
+        <input type="text" id="sidebarSearch" placeholder="Buscar tablas…" oninput="filterSidebar(this.value)">
+      </div>
+      <div class="sidebar-title">Tablas</div>
+      <div class="sidebar-list" id="sidebarTables"></div>
+    </aside>
+    <main class="dash-main" id="dashMain">
+      <div class="empty-view">
+        <i class="fas fa-arrow-left"></i>
+        <p>Selecciona una tabla del panel izquierdo</p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ══ MODAL DE INSTALACIÓN ══ -->
+<div class="modal-overlay" id="installModal">
+  <div class="modal-box">
+    <div class="modal-icon" id="installModalIcon"><i class="fas fa-box"></i></div>
+    <div class="modal-title" id="installModalTitle">Componente no instalado</div>
+    <div class="modal-desc"  id="installModalDesc"></div>
+    <!-- Pestañas de plataforma (solo para tipo servidor) -->
+    <div id="installModalTabs" style="display:none">
+      <div class="platform-tabs">
+        <button class="platform-tab active" data-tab="docker"   onclick="switchTab('docker')">  <i class="fab fa-docker"></i> Docker</button>
+        <button class="platform-tab"        data-tab="linux"    onclick="switchTab('linux')">   <i class="fab fa-linux"></i> Linux</button>
+        <button class="platform-tab"        data-tab="macos"    onclick="switchTab('macos')">   <i class="fab fa-apple"></i> macOS</button>
+        <button class="platform-tab"        data-tab="windows"  onclick="switchTab('windows')"> <i class="fab fa-windows"></i> Windows</button>
+      </div>
+      <div id="tab-docker"  class="platform-panel active"></div>
+      <div id="tab-linux"   class="platform-panel"></div>
+      <div id="tab-macos"   class="platform-panel"></div>
+      <div id="tab-windows" class="platform-panel"></div>
+    </div>
+    <!-- Comandos para tipo driver (sin pestañas) -->
+    <div id="installModalCmds"></div>
+    <div class="modal-actions">
+      <button class="modal-btn-primary" id="installModalBtn">
+        <i class="fas fa-download"></i> Instalar ahora
+      </button>
+      <button class="modal-btn-secondary" onclick="closeInstallModal()">Cancelar</button>
+    </div>
+    <div class="modal-progress" id="installProgress">
+      <div class="modal-spinner"></div>
+      <span id="installProgressMsg">Instalando…</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Estado ───────────────────────────────────────────────────────────────────
+const S = {
+  detection: null, connected: false,
+  dbType: null, tables: [],
+  activeTable: null, activeView: "data",
+  schemaCache: {},
+};
+const R = {
+  cols:[], rows:[], types:[],
+  sortCol:-1, sortDir:1,
+  page:0, pageSize:100, filter:"",
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const DB_NAMES = { postgresql:"PostgreSQL", mysql:"MySQL", mongodb:"MongoDB", sqlite:"SQLite", redis:"Redis" };
+
+function esc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function escAttr(s) { return String(s).replace(/'/g,"\\'"); }
+function delay(ms)  { return new Promise(r => setTimeout(r, ms)); }
+async function post(url, body) {
+  const res = await fetch(url, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+  if (!res.ok && res.status >= 500) {
+    let errMsg = `Error del servidor (${res.status})`;
+    try { const d = await res.json(); errMsg = d.error || errMsg; } catch(_) {}
+    return { ok: false, error: errMsg };
+  }
+  return res.json();
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok && res.status >= 500) {
+    let errMsg = `Error del servidor (${res.status})`;
+    try { const d = await res.json(); errMsg = d.error || errMsg; } catch(_) {}
+    return { ok: false, error: errMsg };
+  }
+  return res.json();
+}
+
+// ─── Toasts ───────────────────────────────────────────────────────────────────
+function toast(msg, type = "info") {
+  const wrap = document.getElementById("toastWrap");
+  const el   = document.createElement("div");
+  const icons = { success:"fa-circle-check", error:"fa-circle-exclamation", info:"fa-circle-info" };
+  const colors= { success:"var(--success)", error:"var(--danger)", info:"var(--accent)" };
+  el.className = `toast ${type}`;
+  el.innerHTML = `<i class="fas ${icons[type]||icons.info}" style="color:${colors[type]||colors.info}"></i> ${esc(msg)}`;
+  wrap.appendChild(el);
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 260); }, 3200);
+}
+
+// ─── Pantallas ────────────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+
+function setScanStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById("ss" + i);
+    el.classList.remove("active","done");
+    if (i < n)  { el.classList.add("done");   el.querySelector(".step-icon").innerHTML = '<i class="fas fa-check"></i>'; }
+    if (i === n) el.classList.add("active");
+  }
+}
+
+// ─── Input enable ─────────────────────────────────────────────────────────────
+document.getElementById("pathInput").oninput = function() {
+  document.getElementById("btnScan").disabled = !this.value.trim();
+};
+
+function fillPath(p) {
+  const inp = document.getElementById("pathInput");
+  inp.value = p;
+  document.getElementById("btnScan").disabled = false;
+  startScan();
+}
+
+// ─── Escanear ─────────────────────────────────────────────────────────────────
+async function startScan() {
+  const path = document.getElementById("pathInput").value.trim();
+  if (!path) { toast("Ingresa la ruta del proyecto", "error"); return; }
+
+  document.getElementById("btnScan").disabled = true;
+  document.getElementById("scanSpinner").style.display = "inline-block";
+  document.getElementById("scanIcon").style.display    = "none";
+
+  showScreen("screen-scanning");
+  // reset step icons
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById("ss" + i);
+    el.classList.remove("active","done");
+    const icons = ["fa-folder-tree","fa-magnifying-glass","fa-plug","fa-table-columns"];
+    el.querySelector(".step-icon").innerHTML = `<i class="fas ${icons[i-1]}"></i>`;
+  }
+
+  try {
+    setScanStep(1);
+    document.getElementById("scanTitle").textContent  = "Leyendo proyecto…";
+    document.getElementById("scanDetail").textContent = path;
+    await delay(500);
+
+    setScanStep(2);
+    document.getElementById("scanTitle").textContent = "Detectando base de datos…";
+    const detRes = await post("/api/detect", { path });
+    if (detRes.error) throw new Error(detRes.error);
+    S.detection = detRes;
+    S.dbType    = detRes.primary_db;
+    document.getElementById("scanDetail").textContent = `${DB_NAMES[S.dbType] || S.dbType} encontrado`;
+    await delay(500);
+
+    const creds = detRes.credentials?.[S.dbType];
+    if (!creds && S.dbType !== "sqlite") {
+      showScreen("screen-welcome");
+      toast("No se encontraron credenciales. Conéctate manualmente.", "info");
+      resetScanBtn();
+      return;
+    }
+
+    setScanStep(3);
+    const isCloud = creds?.is_cloud;
+    document.getElementById("scanTitle").textContent  = isCloud ? "Conectando al servidor cloud…" : "Conectando…";
+    document.getElementById("scanDetail").textContent = isCloud ? `☁ ${creds?.host}` : `${creds?.host || "localhost"}`;
+    const connRes = await post("/api/connect", { credentials: creds || { type: S.dbType } });
+    if (!connRes.ok) {
+      if (connRes.install_hint) {
+        showScreen("screen-welcome");
+        resetScanBtn();
+        showInstallModal(connRes.install_hint, creds, startScan);
+        return;
+      }
+      throw new Error(connRes.error);
+    }
+    S.connected = true;
+    await delay(400);
+
+    setScanStep(4);
+    document.getElementById("scanTitle").textContent = "Cargando tablas…";
+    const tabRes = await fetchJson("/api/tables");
+    if (!tabRes.ok) throw new Error(tabRes.error);
+    S.tables = tabRes.tables || [];
+    document.getElementById("scanDetail").textContent = `${S.tables.length} tablas encontradas`;
+    await delay(400);
+
+    launchDashboard();
+  } catch(e) {
+    toast(e.message, "error");
+    showScreen("screen-welcome");
+    resetScanBtn();
+  }
+}
+
+function resetScanBtn() {
+  document.getElementById("btnScan").disabled = false;
+  document.getElementById("scanSpinner").style.display = "none";
+  document.getElementById("scanIcon").style.display    = "";
+}
+
+function launchDashboard() {
+  const creds = S.detection?.credentials?.[S.dbType] || {};
+  document.getElementById("dbBadgeName").textContent = DB_NAMES[S.dbType] || S.dbType;
+  document.getElementById("dbBadgeDb").textContent   = "— " + (creds.database || S.dbType || "");
+  buildStatsBar();
+  buildSidebar();
+  showScreen("screen-dashboard");
+  if (S.tables.length) {
+    selectTable(S.tables[0].name);
+  } else {
+    showEmptyDbPanel();
+  }
+}
+
+function showEmptyDbPanel() {
+  const appInfo = S.detection?.app_start;
+  const main = document.getElementById("dashMain");
+
+  let actionHtml = "";
+  if (appInfo) {
+    if (appInfo.cmd) {
+      actionHtml = `
+        <div style="background:var(--surface2);border-radius:8px;padding:10px 16px;font-family:monospace;font-size:13px;color:var(--fg-dim);max-width:500px;word-break:break-all">${esc(appInfo.cmd)}</div>
+        <button class="btn btn-primary" id="btnStartApp" onclick="startApp()">
+          <i class="fas fa-play"></i> Iniciar ${esc(appInfo.label)}
+        </button>
+        <div id="appLogBox" style="display:none;width:100%;max-width:660px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;color:var(--fg-dim)">Logs de la aplicación</span>
+            <button class="btn btn-sm" onclick="stopApp()" style="font-size:11px;padding:3px 10px"><i class="fas fa-stop"></i> Detener</button>
+          </div>
+          <pre id="appLogPre" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;height:220px;overflow-y:auto;text-align:left;white-space:pre-wrap;word-break:break-all;color:var(--fg-dim)"></pre>
+        </div>`;
+    } else {
+      actionHtml = `
+        <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 16px;max-width:500px;font-size:13px;color:#856404">
+          <i class="fas fa-triangle-exclamation"></i> ${esc(appInfo.fix || "Instala el runtime necesario para este proyecto")}
+        </div>
+        <button class="btn btn-primary" id="btnInstallRuntime" onclick="installRuntime()">
+          <i class="fas fa-download"></i> Instalar ${esc(appInfo.missing || "runtime")} e iniciar
+        </button>
+        <div id="appLogBox" style="display:none;width:100%;max-width:660px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;color:var(--fg-dim)">Salida</span>
+            <button class="btn btn-sm" onclick="stopApp()" style="font-size:11px;padding:3px 10px"><i class="fas fa-stop"></i> Detener</button>
+          </div>
+          <pre id="appLogPre" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;height:220px;overflow-y:auto;text-align:left;white-space:pre-wrap;word-break:break-all;color:var(--fg-dim)"></pre>
+        </div>`;
+    }
+  }
+
+  const desc = appInfo
+    ? `Puedes iniciar <strong>${esc(appInfo.label)}</strong> para que cree el esquema automáticamente.`
+    : "Ejecuta las migraciones de tu aplicación para crear las tablas.";
+
+  main.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:20px;padding:40px;text-align:center">
+      <div style="font-size:48px">&#128451;</div>
+      <div style="font-size:18px;font-weight:600;color:var(--fg)">Base de datos vacía</div>
+      <div style="color:var(--fg-dim);max-width:440px">La conexión fue exitosa pero la base de datos no tiene tablas. ${desc}</div>
+      ${actionHtml}
+    </div>`;
+}
+
+let _appLogInterval = null;
+
+async function installRuntime() {
+  const btn = document.getElementById("btnInstallRuntime");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Instalando…';
+  document.getElementById("appLogBox").style.display = "";
+  const pre = document.getElementById("appLogPre");
+  pre.textContent = "Descargando e instalando… (puede tardar un minuto)\n";
+
+  const res = await post("/api/app/install-runtime", {});
+  if (!res.ok) {
+    pre.textContent += "\nError: " + res.error;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-download"></i> Reintentar instalación';
+    toast("Error: " + res.error, "error");
+    return;
+  }
+
+  // La instalación corre en segundo plano — hacer polling de logs
+  _appLogInterval = setInterval(async () => {
+    const logRes = await fetchJson("/api/app/logs");
+    if (logRes.lines) {
+      // Filtrar líneas de señalización interna
+      const visible = logRes.lines.filter(l => !l.startsWith("__INSTALL_"));
+      pre.textContent = visible.join("\n");
+      pre.scrollTop = pre.scrollHeight;
+
+      const okLine    = logRes.lines.find(l => l.startsWith("__INSTALL_OK__"));
+      const failLine  = logRes.lines.find(l => l.startsWith("__INSTALL_FAIL__"));
+
+      if (okLine) {
+        clearInterval(_appLogInterval); _appLogInterval = null;
+        toast("Runtime instalado — iniciando aplicación…", "success");
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Iniciando…';
+        const startRes = await post("/api/app/start", {});
+        if (!startRes.ok) {
+          pre.textContent += "\n\nError al iniciar: " + startRes.error;
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fas fa-play"></i> Iniciar app';
+          return;
+        }
+        pre.textContent += "\n\n==> Aplicación iniciada, esperando tablas…\n";
+        _appLogInterval = setInterval(_pollAppLogs, 2000);
+      } else if (failLine) {
+        clearInterval(_appLogInterval); _appLogInterval = null;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-download"></i> Reintentar';
+        toast("Error en la instalación — revisa los logs", "error");
+      }
+    }
+  }, 1500);
+}
+
+async function startApp() {
+  const btn = document.getElementById("btnStartApp");
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Iniciando…';
+  const res = await post("/api/app/start", {});
+  if (!res.ok) { toast(`Error: ${res.error}`, "error"); btn.disabled = false; btn.innerHTML = '<i class="fas fa-play"></i> Iniciar'; return; }
+  document.getElementById("appLogBox").style.display = "";
+  toast("Aplicación iniciada — esperando tablas…", "info");
+  _appLogInterval = setInterval(_pollAppLogs, 2000);
+}
+
+async function stopApp() {
+  clearInterval(_appLogInterval); _appLogInterval = null;
+  await post("/api/app/stop", {});
+  toast("Aplicación detenida", "info");
+  const btn = document.getElementById("btnStartApp");
+  if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-play"></i> Iniciar'; }
+}
+
+async function _pollAppLogs() {
+  const [logRes, tabRes] = await Promise.all([
+    fetchJson("/api/app/logs"),
+    fetchJson("/api/tables"),
+  ]);
+  // Update log display
+  const pre = document.getElementById("appLogPre");
+  if (pre && logRes.lines) {
+    pre.textContent = logRes.lines.join("\n");
+    pre.scrollTop = pre.scrollHeight;
+  }
+  // If tables appeared, stop polling and refresh dashboard
+  if (tabRes.ok && tabRes.tables?.length) {
+    clearInterval(_appLogInterval); _appLogInterval = null;
+    S.tables = tabRes.tables;
+    toast(`✓ ${tabRes.tables.length} tablas creadas`, "success");
+    buildStatsBar();
+    buildSidebar();
+    selectTable(S.tables[0].name);
+  }
+  // If process died with error
+  if (logRes.status && logRes.status.startsWith("exited_") && logRes.status !== "exited_0") {
+    clearInterval(_appLogInterval); _appLogInterval = null;
+    toast("La aplicación se detuvo con error — revisa los logs", "error");
+  }
+}
+
+// ─── Stats bar ────────────────────────────────────────────────────────────────
+function buildStatsBar() {
+  const bar   = document.getElementById("statsBar");
+  const creds = S.detection?.credentials?.[S.dbType] || {};
+  const isCloud = creds.is_cloud;
+  const items = [
+    { icon:"fa-table",      cls:"blue",   val: S.tables.length,                label:"Tablas" },
+    { icon:"fa-database",   cls:"green",  val: DB_NAMES[S.dbType]||S.dbType,   label:"Motor" },
+    { icon: isCloud ? "fa-cloud" : "fa-folder-open",
+      cls: isCloud ? "purple" : "orange",
+      val: isCloud ? (creds.host||"cloud") : truncPath(document.getElementById("pathInput").value.trim()),
+      label: isCloud ? "Servidor" : "Proyecto" },
+  ];
+  bar.innerHTML = items.map(i => `
+    <div class="stat-item">
+      <div class="stat-icon ${i.cls}"><i class="fas ${i.icon}"></i></div>
+      <div>
+        <div class="stat-value">${esc(String(i.val))}</div>
+        <div class="stat-label">${i.label}</div>
+      </div>
+    </div>`).join("");
+}
+
+function truncPath(p) {
+  const parts = p.replace(/\\/g,"/").split("/").filter(Boolean);
+  return parts.length > 2 ? "…/" + parts.slice(-2).join("/") : p;
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+const TABLE_COLORS = ["#007AFF","#34c759","#ff9500","#ff2d55","#af52de","#5ac8fa","#ff9f0a","#ff3b30"];
+const TABLE_ICONS  = ["fa-users","fa-box","fa-receipt","fa-tag","fa-star","fa-comments","fa-credit-card","fa-table"];
+
+function getTableMeta(name) {
+  const idx = S.tables.findIndex(t => t.name === name);
+  return {
+    color: TABLE_COLORS[idx >= 0 ? idx % TABLE_COLORS.length : 0],
+    icon:  TABLE_ICONS [idx >= 0 ? idx % TABLE_ICONS.length  : 0],
+  };
+}
+
+function buildSidebar()         { renderSidebar(S.tables); }
+function filterSidebar(val)     { renderSidebar(S.tables.filter(t => t.name.toLowerCase().includes(val.toLowerCase()))); }
+
+function renderSidebar(tables) {
+  const wrap = document.getElementById("sidebarTables");
+  wrap.innerHTML = tables.map((t, i) => {
+    const { color, icon } = getTableMeta(t.name);
+    return `
+      <div class="sidebar-item ${t.name === S.activeTable ? "active" : ""} card-in"
+           id="si_${escAttr(t.name)}" onclick="selectTable('${escAttr(t.name)}')"
+           style="animation-delay:${i*30}ms">
+        <div class="sidebar-item-icon" style="background:${color}12;color:${color}">
+          <i class="fas ${icon}"></i>
+        </div>
+        <span class="sidebar-item-name">${esc(t.name)}</span>
+        ${t.size ? `<span class="sidebar-item-count">${esc(t.size)}</span>` : ""}
+      </div>`;
+  }).join("") || `<div style="padding:14px 16px;color:var(--fg-dim);font-size:13px">Sin resultados</div>`;
+}
+
+// ─── Seleccionar tabla ────────────────────────────────────────────────────────
+async function selectTable(name) {
+  S.activeTable = name;
+  document.querySelectorAll(".sidebar-item").forEach(el => el.classList.remove("active"));
+  const si = document.getElementById("si_" + name);
+  if (si) { si.classList.add("active"); si.scrollIntoView({ block:"nearest" }); }
+  setView(S.activeView);
+}
+
+// ─── Vistas ───────────────────────────────────────────────────────────────────
+function setView(view) {
+  S.activeView = view;
+  ["cols","data","er"].forEach(v => {
+    document.getElementById("btnView" + v.charAt(0).toUpperCase() + v.slice(1))
+      ?.classList.toggle("active", v === view);
+  });
+  if      (view === "cols") renderColsView();
+  else if (view === "data") renderDataView();
+  else if (view === "er")   renderErView();
+}
+
+// ── Vista Columnas ────────────────────────────────────────────────────────────
+async function renderColsView() {
+  if (!S.activeTable) return;
+  const main = document.getElementById("dashMain");
+  const { color, icon } = getTableMeta(S.activeTable);
+
+  main.innerHTML = `<div class="empty-view"><i class="fas fa-spinner fa-spin"></i><p>Cargando esquema…</p></div>`;
+
+  if (!S.schemaCache[S.activeTable]) {
+    const res = await fetchJson(`/api/schema/${encodeURIComponent(S.activeTable)}`);
+    if (res.ok) S.schemaCache[S.activeTable] = res.columns;
+    else { toast(res.error || "Error cargando esquema", "error"); return; }
+  }
+
+  const columns = S.schemaCache[S.activeTable];
+  const tbl     = S.tables.find(t => t.name === S.activeTable);
+
+  // Inferir relaciones a partir de columnas FK + nombre convencional
+  const rels = [];
+  if (columns) {
+    columns.filter(c => c.key === "FK").forEach(c => {
+      const m = c.name.match(/^(.+)_id$/i);
+      if (m) {
+        const base   = m[1];
+        const target = S.tables.find(t =>
+          t.name === base || t.name === base + "s" || t.name === base + "es"
+        );
+        if (target) rels.push({ fromCol: c.name, toTable: target.name, toCol: "id" });
+      }
+    });
+  }
+
+  main.innerHTML = `
+    <div class="view-header card-in">
+      <div class="view-header-row">
+        <div class="view-header-icon" style="background:${color}12;color:${color}">
+          <i class="fas ${icon}"></i>
+        </div>
+        <div>
+          <div class="view-header-name">${esc(S.activeTable)}</div>
+          <div class="view-header-desc">${columns.length} columnas${tbl?.size ? " · " + esc(tbl.size) : ""}</div>
+        </div>
+      </div>
+      <div class="view-header-actions">
+        <button class="btn-action" onclick="setView('data')"><i class="fas fa-table-list"></i> Ver datos</button>
+        <button class="btn-action" onclick="exportActive('csv')"><i class="fas fa-download"></i> CSV</button>
+        <button class="btn-action" onclick="exportActive('json')"><i class="fas fa-download"></i> JSON</button>
+      </div>
+    </div>
+
+    <div class="section-label card-in" style="animation-delay:40ms">Columnas (${columns.length})</div>
+    <div class="columns-grid">
+      ${columns.map((c, i) => colCard(c, i)).join("")}
+    </div>
+
+    ${rels.length ? `
+      <div class="section-label card-in" style="animation-delay:${60+columns.length*25}ms">Relaciones (${rels.length})</div>
+      <div class="rel-list">
+        ${rels.map((r, i) => relCard(r, i, columns.length, color, icon)).join("")}
+      </div>` : ""}`;
+}
+
+function colCard(col, i) {
+  const tc = ttClass(col.type);
+  const keyIcon = col.key === "PK"
+    ? `<span class="k pk"><i class="fas fa-key"></i></span>`
+    : col.key === "FK"
+    ? `<span class="k fk"><i class="fas fa-link"></i></span>`
+    : col.key === "UNIQUE"
+    ? `<span class="k uq"><i class="fas fa-fingerprint"></i></span>`
+    : "";
+  return `
+    <div class="col-card card-in" style="animation-delay:${60+i*25}ms">
+      <div class="col-card-top">
+        <div class="col-card-name">${keyIcon}${esc(col.name)}</div>
+        <span class="type-tag ${tc}">${esc(col.type.toUpperCase())}</span>
+      </div>
+      <div class="col-card-meta">
+        <span><i class="fas fa-circle-${col.nullable?"xmark":"check"}"
+          style="color:${col.nullable?"var(--danger)":"var(--success)"}"></i>
+          ${col.nullable ? "Nullable" : "Required"}</span>
+        ${col.default != null ? `<span><i class="fas fa-equals"></i> ${esc(String(col.default))}</span>` : ""}
+      </div>
+    </div>`;
+}
+
+function relCard(r, i, colCount, fromColor, fromIcon) {
+  const toMeta = getTableMeta(r.toTable);
+  return `
+    <div class="rel-card card-in" style="animation-delay:${80+colCount*25+i*35}ms">
+      <div class="rel-end">
+        <div class="rel-end-icon" style="background:${fromColor}12;color:${fromColor}">
+          <i class="fas ${fromIcon}"></i>
+        </div>
+        <div>
+          <div class="rel-end-table">${esc(S.activeTable)}</div>
+          <div class="rel-end-col">${esc(r.fromCol)}</div>
+        </div>
+      </div>
+      <div class="rel-arrow">
+        <span class="rel-badge">N:1</span>
+        <i class="fas fa-arrow-right" style="font-size:11px"></i>
+      </div>
+      <div class="rel-end" style="justify-content:flex-end">
+        <div style="text-align:right">
+          <div class="rel-end-table">${esc(r.toTable)}</div>
+          <div class="rel-end-col">${esc(r.toCol)}</div>
+        </div>
+        <div class="rel-end-icon" style="background:${toMeta.color}12;color:${toMeta.color}">
+          <i class="fas ${toMeta.icon}"></i>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Vista Datos ───────────────────────────────────────────────────────────────
+async function renderDataView() {
+  if (!S.activeTable) return;
+  const main = document.getElementById("dashMain");
+  const { color, icon } = getTableMeta(S.activeTable);
+
+  main.innerHTML = `<div class="empty-view"><i class="fas fa-spinner fa-spin"></i><p>Cargando datos…</p></div>`;
+
+  const query = S.dbType === "mongodb"
+    ? `{"find":"${S.activeTable}","filter":{},"limit":1000}`
+    : S.dbType === "redis" ? "KEYS *"
+    : `SELECT * FROM ${S.activeTable} LIMIT 1000;`;
+
+  const res = S.editMode && S.dbType === "redis"
+    ? await fetchJson("/api/redis/scan")
+    : await post("/api/query", { query, include_id: S.editMode && S.dbType === "mongodb" });
+  R.cols = res.columns || [];
+  R.rows = res.rows    || [];
+  R.types = detectTypes(R.cols, R.rows);
+  R.sortCol = -1; R.sortDir = 1; R.page = 0; R.filter = "";
+
+  const tbl = S.tables.find(t => t.name === S.activeTable);
+
+  main.innerHTML = `
+    <div class="view-header card-in">
+      <div class="view-header-row">
+        <div class="view-header-icon" style="background:${color}12;color:${color}">
+          <i class="fas ${icon}"></i>
+        </div>
+        <div>
+          <div class="view-header-name">${esc(S.activeTable)}</div>
+          <div class="view-header-desc" id="dataDesc">${R.rows.length.toLocaleString("es")} filas · ${R.cols.length} columnas</div>
+        </div>
+      </div>
+      <div class="view-header-actions">
+        <button class="btn-action" onclick="setView('cols')"><i class="fas fa-table-columns"></i> Ver columnas</button>
+        <button class="btn-action" onclick="exportActive('csv')"><i class="fas fa-download"></i> CSV</button>
+        <button class="btn-action" onclick="exportActive('json')"><i class="fas fa-download"></i> JSON</button>
+        <button class="btn-action" id="btnSqlToggle" onclick="toggleSQL()"><i class="fas fa-code"></i> SQL</button>
+      </div>
+    </div>
+
+    <div class="sql-panel" id="sqlPanel">
+      <div class="sql-panel-header">
+        <span><i class="fas fa-code"></i> &nbsp;Consulta SQL avanzada</span>
+        <button class="btn-action" onclick="toggleSQL()" style="padding:4px 10px;font-size:11px">Cerrar</button>
+      </div>
+      <textarea class="sql-editor" id="queryEditor">${esc(query)}</textarea>
+      <div class="sql-footer">
+        <button class="btn-run" onclick="runSQL()"><i class="fas fa-play"></i> Ejecutar</button>
+        <span class="sql-hint">Ctrl+Enter</span>
+      </div>
+    </div>
+
+    <div class="data-toolbar">
+      <input class="search-box" id="searchBox" placeholder="Buscar en los datos…" oninput="applyFilter(this.value)">
+      <span class="data-meta" id="dataMeta">${R.rows.length.toLocaleString("es")} filas</span>
+    </div>
+
+    <div class="data-table-wrap">
+      <div id="tableScroll"></div>
+      <div class="data-pagination" id="dataPag" style="display:none"></div>
+    </div>`;
+
+  buildTable();
+}
+
+function toggleSQL() {
+  const panel = document.getElementById("sqlPanel");
+  const btn   = document.getElementById("btnSqlToggle");
+  const show  = !panel.classList.contains("show");
+  panel.classList.toggle("show", show);
+  if (btn) btn.classList.toggle("active", show);
+}
+
+async function runSQL() {
+  const q = document.getElementById("queryEditor")?.value.trim();
+  if (!q) return;
+  const res = await post("/api/query", { query: q });
+  R.cols = res.columns || []; R.rows = res.rows || [];
+  R.types = detectTypes(R.cols, R.rows);
+  R.sortCol = -1; R.sortDir = 1; R.page = 0; R.filter = "";
+  const sb = document.getElementById("searchBox"); if (sb) sb.value = "";
+  buildTable();
+}
+
+// ─── Tabla ────────────────────────────────────────────────────────────────────
+function detectTypes(cols, rows) {
+  return cols.map((_, ci) => {
+    const vals = rows.map(r => r[ci]).filter(v => v !== null && v !== undefined && v !== "");
+    if (!vals.length) return "text";
+    if (vals.every(v => !isNaN(Number(v)))) return "num";
+    const bools = new Set(["true","false","1","0","yes","no","t","f"]);
+    if (vals.length > 1 && vals.every(v => bools.has(String(v).toLowerCase()))) return "bool";
+    if (vals.slice(0,6).every(v => !isNaN(new Date(v)) && /\d{4}/.test(String(v)))) return "date";
+    return "text";
+  });
+}
+
+function applyFilter(val) { R.filter = val.toLowerCase(); R.page = 0; buildTable(); }
+function sortBy(ci)       { R.sortDir = R.sortCol === ci ? R.sortDir * -1 : 1; R.sortCol = ci; R.page = 0; buildTable(); }
+function changePage(d)    { R.page += d; buildTable(); }
+
+function renderCell(val, type) {
+  if (val === null || val === undefined || val === "") return `<td class="null-val">—</td>`;
+  const s = String(val);
+  if (type === "bool") {
+    const t = ["true","1","yes","t"].includes(s.toLowerCase());
+    return `<td class="${t ? "bool-t" : "bool-f"}">${t ? "✓ Sí" : "✗ No"}</td>`;
+  }
+  if (type === "num") {
+    const n = Number(val);
+    const f = Number.isInteger(n) ? n.toLocaleString("es") : n.toLocaleString("es",{maximumFractionDigits:6});
+    return `<td class="num-val" title="${esc(s)}">${esc(f)}</td>`;
+  }
+  if (type === "date") {
+    try {
+      const d = new Date(val);
+      const f = d.toLocaleString("es",{dateStyle:"medium",timeStyle:s.includes("T")?"short":undefined});
+      return `<td class="date-val" title="${esc(s)}">${esc(f)}</td>`;
+    } catch(e) {}
+  }
+  if (s.length > 55) {
+    return `<td class="long-val" title="${esc(s)}"
+      onclick="this.textContent=this.dataset.expanded==='1'?(this.dataset.expanded='0',this.dataset.short):(this.dataset.expanded='1',this.dataset.full)"
+      data-full="${escAttr(s)}" data-short="${escAttr(s.slice(0,55))}…" data-expanded="0">${esc(s.slice(0,55))}…</td>`;
+  }
+  return `<td title="${esc(s)}">${esc(s)}</td>`;
+}
+
+// ── Vista ER ──────────────────────────────────────────────────────────────────
+async function renderErView() {
+  const main = document.getElementById("dashMain");
+  main.innerHTML = `
+    <div class="view-header card-in">
+      <div class="view-header-row">
+        <div class="view-header-icon" style="background:var(--accent-light);color:var(--accent)">
+          <i class="fas fa-diagram-project"></i>
+        </div>
+        <div>
+          <div class="view-header-name">Diagrama Entidad-Relación</div>
+          <div class="view-header-desc">Arrastra las tablas para reorganizar el diagrama</div>
+        </div>
+      </div>
+    </div>
+    <div class="empty-view" id="erLoading"><i class="fas fa-spinner fa-spin"></i><p>Cargando esquemas…</p></div>
+    <div class="er-container card-in" id="erContainer" style="display:none;animation-delay:40ms">
+      <svg class="er-svg" id="erSvg"></svg>
+      <div class="er-canvas" id="erCanvas"></div>
+    </div>`;
+
+  // Cargar todos los schemas que faltan
+  const toLoad = S.tables.filter(t => !S.schemaCache[t.name]);
+  for (const t of toLoad) {
+    const res = await fetchJson(`/api/schema/${encodeURIComponent(t.name)}`);
+    if (res.ok) S.schemaCache[t.name] = res.columns;
+  }
+
+  document.getElementById("erLoading").style.display  = "none";
+  document.getElementById("erContainer").style.display = "";
+  requestAnimationFrame(buildER);
+}
+
+function buildER() {
+  const container = document.getElementById("erContainer");
+  const canvas    = document.getElementById("erCanvas");
+  const svg       = document.getElementById("erSvg");
+  if (!container) return;
+
+  const BOX_W = 200, GAP_X = 80, GAP_Y = 40, OX = 30, OY = 25;
+  const cols  = Math.min(3, S.tables.length);
+  const pos   = {};
+
+  S.tables.forEach((t, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x   = OX + col * (BOX_W + GAP_X);
+    const y   = OY + row * 220 + GAP_Y * row;
+    pos[t.name] = { x, y };
+
+    const { color, icon } = getTableMeta(t.name);
+    const cols_ = S.schemaCache[t.name] || [];
+
+    const box = document.createElement("div");
+    box.className  = "er-box card-in";
+    box.dataset.table = t.name;
+    box.style.left = x + "px";
+    box.style.top  = y + "px";
+    box.style.width = BOX_W + "px";
+    box.style.animationDelay = i * 50 + "ms";
+
+    let html = `<div class="er-box-head" style="border-top:3px solid ${color}">
+      <i class="fas ${icon}" style="color:${color}"></i>${esc(t.name)}
+    </div>`;
+    cols_.forEach(c => {
+      const isPk = c.key === "PK";
+      html += `<div class="er-box-col ${isPk ? "is-pk" : ""}">
+        ${isPk ? '<span class="eck"><i class="fas fa-key"></i></span>' : ""}
+        ${esc(c.name)}
+        <span class="ect">${esc(c.type.split("(")[0])}</span>
+      </div>`;
+    });
+    box.innerHTML = html;
+    canvas.appendChild(box);
+    makeDraggable(box, pos, svg);
+  });
+
+  drawERLines(pos, svg);
+}
+
+function makeDraggable(box, pos, svg) {
+  let dragging = false, sx, sy, ox, oy;
+  box.onmousedown = e => {
+    if (e.target.closest(".er-box-col")) return;
+    dragging = true; box.classList.add("dragging");
+    sx = e.clientX; sy = e.clientY;
+    ox = parseFloat(box.style.left); oy = parseFloat(box.style.top);
+    e.preventDefault();
+  };
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    box.style.left = (ox + e.clientX - sx) + "px";
+    box.style.top  = (oy + e.clientY - sy) + "px";
+    pos[box.dataset.table] = { x: ox + e.clientX - sx, y: oy + e.clientY - sy };
+    drawERLines(pos, svg);
+  });
+  document.addEventListener("mouseup", () => {
+    if (dragging) { dragging = false; box.classList.remove("dragging"); }
+  });
+}
+
+function drawERLines(pos, svg) {
+  if (!svg) return;
+  svg.innerHTML = "";
+  const BOX_W = 200;
+  const boxHeights = {};
+  document.querySelectorAll(".er-box").forEach(b => { boxHeights[b.dataset.table] = b.offsetHeight; });
+
+  // Collect FK relationships from schema cache
+  const rels = [];
+  S.tables.forEach(t => {
+    const cols = S.schemaCache[t.name] || [];
+    cols.filter(c => c.key === "FK").forEach(c => {
+      const m = c.name.match(/^(.+)_id$/i);
+      if (m) {
+        const base   = m[1];
+        const target = S.tables.find(x => x.name === base || x.name === base+"s" || x.name === base+"es");
+        if (target) rels.push({ from: t.name, to: target.name });
+      }
+    });
+  });
+
+  rels.forEach(r => {
+    const fp = pos[r.from], tp = pos[r.to];
+    if (!fp || !tp) return;
+    const fH = boxHeights[r.from] || 120, tH = boxHeights[r.to] || 120;
+    const x1 = fp.x + BOX_W, y1 = fp.y + fH / 2;
+    const x2 = tp.x,         y2 = tp.y + tH / 2;
+    const dx = Math.abs(x2 - x1) * 0.5;
+
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", `M${x1} ${y1}C${x1+dx} ${y1},${x2-dx} ${y2},${x2} ${y2}`);
+    path.setAttribute("fill","none");
+    path.setAttribute("stroke","rgba(0,122,255,0.2)");
+    path.setAttribute("stroke-width","1.5");
+    svg.appendChild(path);
+
+    [{ x:x1, y:y1 }, { x:x2, y:y2 }].forEach(pt => {
+      const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+      c.setAttribute("cx", pt.x); c.setAttribute("cy", pt.y); c.setAttribute("r","3.5");
+      c.setAttribute("fill","white"); c.setAttribute("stroke","#007AFF"); c.setAttribute("stroke-width","1.5");
+      svg.appendChild(c);
+    });
+
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+    g.setAttribute("transform",`translate(${mx},${my})`);
+    const bg = document.createElementNS("http://www.w3.org/2000/svg","rect");
+    bg.setAttribute("x","-18"); bg.setAttribute("y","-9"); bg.setAttribute("width","36"); bg.setAttribute("height","18"); bg.setAttribute("rx","9");
+    bg.setAttribute("fill","white"); bg.setAttribute("stroke","rgba(0,122,255,0.15)"); bg.setAttribute("stroke-width","1");
+    const tx = document.createElementNS("http://www.w3.org/2000/svg","text");
+    tx.setAttribute("text-anchor","middle"); tx.setAttribute("dominant-baseline","central");
+    tx.setAttribute("fill","#007AFF"); tx.setAttribute("font-size","10");
+    tx.setAttribute("font-family","Inter, sans-serif"); tx.setAttribute("font-weight","600");
+    tx.textContent = "N:1";
+    g.appendChild(bg); g.appendChild(tx); svg.appendChild(g);
+  });
+}
+
+// ─── Type helpers ─────────────────────────────────────────────────────────────
+function ttClass(t) {
+  if (!t) return "tt-other";
+  const l = t.toLowerCase();
+  if (/int|serial|number/.test(l))              return "tt-int";
+  if (/float|real|double|decimal|numeric/.test(l)) return "tt-float";
+  if (/varchar|char/.test(l))                   return "tt-varchar";
+  if (/text|longtext|clob|enum/.test(l))        return "tt-text";
+  if (/bool|tinyint/.test(l))                   return "tt-bool";
+  if (/date|time|timestamp/.test(l))            return "tt-date";
+  return "tt-other";
+}
+
+// ─── Exportar ─────────────────────────────────────────────────────────────────
+async function exportActive(fmt) {
+  const name = S.activeTable;
+  if (!name) { toast("Selecciona una tabla primero", "error"); return; }
+  toast(`Descargando ${name}.${fmt}…`);
+  const res = await fetch("/api/export", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ table: name, format: fmt })
+  });
+  if (!res.ok) { const e = await res.json(); toast(e.error,"error"); return; }
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `${name}.${fmt}`; a.click();
+  URL.revokeObjectURL(url);
+  toast(`Descargado: ${name}.${fmt}`, "success");
+}
+
+// ─── Volver ───────────────────────────────────────────────────────────────────
+async function goBack() {
+  if (_appLogInterval) { clearInterval(_appLogInterval); _appLogInterval = null; }
+  await fetch("/api/disconnect", { method:"POST" });
+  S.connected = false; S.tables = []; S.activeTable = null; S.schemaCache = {};
+  showScreen("screen-welcome");
+  resetScanBtn();
+}
+
+// ─── Cloud manual ─────────────────────────────────────────────────────────────
+let cloudDbType = "postgresql";
+
+const CLOUD_PROVIDERS = {
+  postgresql: [
+    { name:"Supabase",  host:"db.xxxx.supabase.co",  port:5432 },
+    { name:"Neon",      host:"xxxx.neon.tech",        port:5432 },
+    { name:"Railway",   host:"containers-us-west-x.railway.app", port:5432 },
+    { name:"AWS RDS",   host:"xxxx.rds.amazonaws.com",port:5432 },
+  ],
+  mysql: [
+    { name:"PlanetScale",host:"xxxx.connect.psdb.cloud",   port:3306 },
+    { name:"Railway",    host:"containers-us-west-x.railway.app", port:3306 },
+  ],
+  mongodb: [
+    { name:"MongoDB Atlas",host:"cluster0.xxxx.mongodb.net",port:27017 },
+  ],
+  redis: [
+    { name:"Upstash",    host:"xxxx.upstash.io",    port:6379 },
+    { name:"Redis Cloud",host:"redis-xxxx.c1.us-east-1-2.ec2.redns.redis-cloud.com",port:6379 },
+  ],
+  sqlite: [],
+};
+
+function selectDbType(type) {
+  cloudDbType = type;
+  document.querySelectorAll(".db-type-btn").forEach(b => b.classList.toggle("active", b.dataset.type === type));
+  renderCloudFields();
+}
+
+function renderCloudFields() {
+  const wrap  = document.getElementById("cloudFields");
+  const exWrap= document.getElementById("cloudExamples");
+  if (!wrap) return;
+
+  if (cloudDbType === "sqlite") {
+    wrap.innerHTML = `
+      <div class="cloud-field-group">
+        <label class="cloud-label">Archivo de base de datos</label>
+        <div class="cloud-input-group">
+          <label>Ruta completa al archivo .db</label>
+          <input class="cloud-input" id="cc_path" placeholder="/ruta/al/archivo.db">
+        </div>
+      </div>`;
+    exWrap.innerHTML = "";
+    return;
+  }
+
+  const defPort  = { postgresql:5432, mysql:3306, mongodb:27017, redis:6379 }[cloudDbType] || "";
+  const showDb   = cloudDbType !== "redis";
+  const showUser = cloudDbType !== "redis";
+
+  wrap.innerHTML = `
+    <div class="cloud-field-group">
+      <label class="cloud-label">Datos de conexión</label>
+      <div class="cloud-grid cols3">
+        <div class="cloud-input-group">
+          <label>Host / URL del servidor</label>
+          <input class="cloud-input" id="cc_host" placeholder="db.ejemplo.com">
+        </div>
+        <div class="cloud-input-group">
+          <label>Puerto</label>
+          <input class="cloud-input" id="cc_port" value="${defPort}" placeholder="${defPort}">
+        </div>
+        ${showDb ? `<div class="cloud-input-group span2"><label>Base de datos</label><input class="cloud-input" id="cc_database" placeholder="mi_base"></div>` : ""}
+        ${showUser ? `<div class="cloud-input-group"><label>Usuario</label><input class="cloud-input" id="cc_user" placeholder="usuario"></div>` : ""}
+        <div class="cloud-input-group ${showUser ? "" : "span2"}">
+          <label>Contraseña</label>
+          <input class="cloud-input" id="cc_password" type="password" placeholder="••••••••">
+        </div>
+      </div>
+    </div>
+    <div class="cloud-field-group">
+      <label class="cloud-label" style="margin-bottom:4px">O pega una URL completa</label>
+      <input class="cloud-input" id="cc_url" placeholder="postgresql://usuario:contraseña@host:5432/base" oninput="parseConnectionUrl(this.value)" style="font-size:12px">
+    </div>`;
+
+  const providers = CLOUD_PROVIDERS[cloudDbType] || [];
+  exWrap.innerHTML = providers.length
+    ? `<div style="font-size:11px;color:var(--fg-dim);margin-bottom:6px">Proveedores compatibles:</div>
+       <div class="cloud-provider-btns">
+         ${providers.map(p => `<button class="provider-btn" onclick="fillProvider(${JSON.stringify(p).replace(/"/g,'&quot;')})">☁ ${p.name}</button>`).join("")}
+       </div>`
+    : "";
+}
+
+function fillProvider(p) {
+  const h = document.getElementById("cc_host"); if(h) h.value = p.host;
+  const po= document.getElementById("cc_port"); if(po) po.value = p.port;
+  toast(`Plantilla de ${p.name} cargada — completa los campos`, "info");
+}
+
+function parseConnectionUrl(url) {
+  if (!url.trim()) return;
+  try {
+    const u = new URL(url.replace(/^mongodb\+srv:\/\//,"mongodb://"));
+    const v = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+    v("cc_host", u.hostname);
+    v("cc_port", u.port);
+    v("cc_database", u.pathname.replace("/",""));
+    v("cc_user", decodeURIComponent(u.username || ""));
+    v("cc_password", decodeURIComponent(u.password || ""));
+  } catch(e) {}
+}
+
+async function connectCloud() {
+  const btn = document.getElementById("btnCloudConnect");
+  btn.disabled = true;
+  document.getElementById("cloudConnSpinner").style.display = "inline-block";
+  document.getElementById("cloudConnIcon").style.display    = "none";
+
+  const g = id => document.getElementById(id)?.value?.trim() || null;
+  let creds = { type: cloudDbType };
+
+  if (cloudDbType === "sqlite") {
+    creds.path = g("cc_path");
+    if (!creds.path) { toast("Ingresa la ruta del archivo SQLite","error"); resetCloudBtn(); return; }
+  } else {
+    const host = g("cc_host");
+    if (!host) { toast("Ingresa el host del servidor","error"); resetCloudBtn(); return; }
+    creds.host     = host;
+    creds.port     = parseInt(g("cc_port")) || null;
+    creds.database = g("cc_database") || "";
+    creds.user     = g("cc_user")     || "";
+    creds.password = g("cc_password") || "";
+    const rawUrl   = g("cc_url");
+    if (rawUrl) creds.raw_url = rawUrl;
+  }
+
+  showScreen("screen-scanning");
+  setScanStep(3);
+  document.getElementById("scanTitle").textContent  = "Conectando al servidor…";
+  document.getElementById("scanDetail").textContent = creds.host || creds.path || "";
+
+  try {
+    const connRes = await post("/api/connect", { credentials: creds });
+    if (!connRes.ok) {
+      if (connRes.install_hint) {
+        showScreen("screen-welcome");
+        resetCloudBtn();
+        showInstallModal(connRes.install_hint, creds, connectCloud);
+        return;
+      }
+      throw new Error(connRes.error);
+    }
+    S.connected = true; S.dbType = cloudDbType;
+    S.detection = { primary_db: cloudDbType, credentials: { [cloudDbType]: creds }, project_path: creds.host || "cloud" };
+    document.getElementById("pathInput").value = creds.host || creds.path || "servidor cloud";
+
+    setScanStep(4);
+    document.getElementById("scanTitle").textContent = "Cargando tablas…";
+    const tabRes = await fetchJson("/api/tables");
+    if (!tabRes.ok) throw new Error(tabRes.error);
+    S.tables = tabRes.tables || [];
+    await delay(400);
+    launchDashboard();
+  } catch(e) {
+    toast(e.message, "error");
+    showScreen("screen-welcome");
+  } finally {
+    resetCloudBtn();
+  }
+}
+
+function resetCloudBtn() {
+  const btn = document.getElementById("btnCloudConnect");
+  if (btn) btn.disabled = false;
+  const sp = document.getElementById("cloudConnSpinner"); if(sp) sp.style.display = "none";
+  const ic = document.getElementById("cloudConnIcon");    if(ic) ic.style.display = "";
+}
+
+// ─── Auto-detección cloud ─────────────────────────────────────────────────────
+async function discoverCloud() {
+  const btn  = document.getElementById("btnAutoDetect");
+  const spin = document.getElementById("autoDetectSpin");
+  const res  = document.getElementById("cloudDiscoverResult");
+  btn.disabled = true; spin.style.display = "inline-block"; res.style.display = "none";
+  try {
+    const data = await fetchJson("/api/cloud/discover");
+    res.innerHTML = buildDiscoverHTML(data);
+    res.style.display = "";
+  } catch(e) {
+    toast("Error al detectar plataformas","error");
+  } finally {
+    btn.disabled = false; spin.style.display = "none";
+  }
+}
+
+function buildDiscoverHTML(data) {
+  const sb = data.supabase || {}, fly = data.fly || {};
+  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+
+  // Supabase
+  html += '<div class="platform-card"><div class="platform-card-title"><span style="font-size:15px">⚡</span> Supabase';
+  if (sb.installed && sb.logged_in)  html += '<span class="platform-tag ok">Conectado</span>';
+  else if (sb.installed)             html += '<span class="platform-tag warn">Sin login</span>';
+  else                               html += '<span class="platform-tag warn">No instalado</span>';
+  html += '</div>';
+  if (!sb.installed) {
+    html += `<div class="install-hint">Instala con: <code>npm i -g supabase</code> o <code>brew install supabase/tap/supabase</code><br>Luego: <code>supabase login</code></div>`;
+  } else if (!sb.logged_in) {
+    html += `<div class="install-hint">Ejecuta: <code>supabase login</code>${sb.error?`<br><small style="color:var(--danger)">${esc(sb.error)}</small>`:""}</div>`;
+  } else {
+    const projects = sb.projects || [];
+    if (!projects.length) {
+      html += `<div style="font-size:12px;color:var(--fg-dim)">No se encontraron proyectos.</div>`;
+    } else {
+      html += '<div style="display:flex;flex-direction:column;gap:6px">';
+      projects.forEach(p => {
+        html += `<div class="platform-project"><div><div class="platform-project-name">${esc(p.name)}</div><div class="platform-project-host">${esc(p.host)}</div></div>
+          <button class="btn-action" style="font-size:11px;padding:5px 10px" onclick='useSupabaseProject(${JSON.stringify(p).replace(/'/g,"\\'")} )'>Usar →</button></div>`;
+      });
+      html += '</div>';
+    }
+  }
+  html += '</div>';
+
+  // Fly.io
+  html += '<div class="platform-card"><div class="platform-card-title"><span style="font-size:15px">🪂</span> Fly.io';
+  if (fly.installed && fly.logged_in)  html += '<span class="platform-tag ok">Conectado</span>';
+  else if (fly.installed)              html += '<span class="platform-tag warn">Sin login</span>';
+  else                                 html += '<span class="platform-tag warn">No instalado</span>';
+  html += '</div>';
+  if (!fly.installed) {
+    html += `<div class="install-hint">Instala con: <code>curl -L https://fly.io/install.sh | sh</code><br>Luego: <code>fly auth login</code></div>`;
+  } else if (!fly.logged_in) {
+    html += `<div class="install-hint">Ejecuta: <code>fly auth login</code>${fly.error?`<br><small style="color:var(--danger)">${esc(fly.error)}</small>`:""}</div>`;
+  } else {
+    const apps = fly.apps || [];
+    if (!apps.length) {
+      html += `<div style="font-size:12px;color:var(--fg-dim)">No se encontraron apps de Postgres.</div>`;
+    } else {
+      html += '<div style="display:flex;flex-direction:column;gap:6px">';
+      apps.forEach(a => {
+        html += `<div class="platform-project"><div><div class="platform-project-name">${esc(a.name)}</div><div class="platform-project-host">fly.io · ${esc(a.status||"")}</div></div>
+          <button class="btn-action" style="font-size:11px;padding:5px 10px;color:var(--teal);border-color:var(--teal)" onclick="connectFlyProxy('${escAttr(a.name)}')">🔗 Proxy</button></div>`;
+      });
+      html += '</div>';
+    }
+  }
+  html += '</div></div>';
+  return html;
+}
+
+function useSupabaseProject(project) {
+  selectDbType("postgresql");
+  setTimeout(() => {
+    const v = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
+    v("cc_host", project.host); v("cc_port","5432"); v("cc_database","postgres"); v("cc_user","postgres");
+    document.getElementById("cc_password")?.focus();
+    toast(`"${project.name}" seleccionado — ingresa la contraseña`, "info");
+  }, 150);
+}
+
+async function connectFlyProxy(appName) {
+  toast(`Iniciando proxy para ${appName}…`, "info");
+  try {
+    const res = await post("/api/cloud/fly-proxy", { app: appName });
+    if (!res.ok) { toast(res.error||"Error al iniciar proxy","error"); return; }
+    selectDbType("postgresql");
+    await delay(150);
+    const v = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
+    v("cc_host","localhost"); v("cc_port","15432"); v("cc_database","postgres"); v("cc_user","postgres");
+    document.getElementById("cc_password")?.focus();
+    toast("Proxy activo en localhost:15432 — ingresa la contraseña y conecta","success");
+  } catch(e) { toast(e.message,"error"); }
+}
+
+// ─── Keyboard ─────────────────────────────────────────────────────────────────
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.key === "Enter") runSQL?.();
+});
+
+// ─── Restaurar sesión ─────────────────────────────────────────────────────────
+(async () => {
+  try {
+    const data = await fetchJson("/api/status");
+    if (data.connected && data.credentials) {
+      S.connected = true;
+      S.dbType    = data.credentials.type;
+      if (data.detection) {
+        S.detection = data.detection;
+        document.getElementById("pathInput").value = data.detection.project_path || "";
+        document.getElementById("btnScan").disabled = false;
+      }
+      const tabRes = await fetchJson("/api/tables");
+      if (tabRes.ok) { S.tables = tabRes.tables || []; launchDashboard(); }
+    }
+  } catch(e) {}
+})();
+
+// ─── Modo edición ─────────────────────────────────────────────────────────────
+S.editMode = false;
+
+function toggleEditMode() {
+  S.editMode = !S.editMode;
+  document.getElementById("btnEditMode").classList.toggle("active", S.editMode);
+  document.getElementById("editModeBadge").classList.toggle("visible", S.editMode);
+  document.getElementById("btnEditMode").innerHTML = S.editMode
+    ? '<i class="fas fa-eye"></i> Vista'
+    : '<i class="fas fa-pen-to-square"></i> Editar';
+  // MongoDB necesita recargar con/sin _id; Redis también recarga para mostrar valores
+  if (S.activeView === "data" && (S.dbType === "mongodb" || S.dbType === "redis")) {
+    renderDataView();
+  } else if (S.activeView === "data") {
+    buildTable();
+  }
+}
+
+function getPkCol() {
+  if (S.dbType === "mongodb") return "_id";
+  if (S.dbType === "redis")   return R.cols[0] || "key";
+  const schema = S.schemaCache[S.activeTable] || [];
+  const pk = schema.find(c => c.key === "PK");
+  return pk ? pk.name : (R.cols[0] || null);
+}
+
+function buildTable() {
+  const { cols, rows, types, sortCol, sortDir, page, pageSize, filter } = R;
+
+  let vis = rows;
+  if (filter) vis = rows.filter(r => r.some(c => c !== null && String(c).toLowerCase().includes(filter)));
+  if (sortCol >= 0) {
+    vis = [...vis].sort((a, b) => {
+      const av = a[sortCol], bv = b[sortCol];
+      if (av == null) return 1; if (bv == null) return -1;
+      const an = Number(av), bn = Number(bv);
+      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * sortDir;
+      return String(av).localeCompare(String(bv), "es") * sortDir;
+    });
+  }
+
+  const total = vis.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const p     = Math.max(0, Math.min(page, pages - 1));
+  R.page      = p;
+  const slice  = vis.slice(p * pageSize, (p + 1) * pageSize);
+  const offset = p * pageSize;
+
+  const editColHdr = S.editMode ? `<th class="td-actions"></th>` : "";
+  const ths = cols.map((col, ci) => {
+    const cls = sortCol === ci ? (sortDir === 1 ? "sort-asc" : "sort-desc") : "";
+    const arr = sortCol === ci ? (sortDir === 1 ? "↑" : "↓") : "↕";
+    return `<th class="${cls}" onclick="sortBy(${ci})">
+      <div class="th-inner">${esc(String(col))}<span class="sort-arr">${arr}</span></div>
+    </th>`;
+  }).join("");
+
+  const trs = slice.length
+    ? slice.map((row, ri) => {
+        const globalRi = offset + ri;
+        const tds = row.map((val, ci) => renderCell(val, types[ci])).join("");
+        const actTd = S.editMode
+          ? `<td class="td-actions">
+               <button class="row-btn row-btn-edit"  onclick="startEdit(${globalRi})" title="Editar"><i class="fas fa-pen"></i></button>
+               <button class="row-btn row-btn-del"   onclick="deleteRow(${globalRi})" title="Eliminar"><i class="fas fa-trash"></i></button>
+             </td>`
+          : "";
+        return `<tr id="drow_${globalRi}">${actTd}<td class="td-rn">${globalRi + 1}</td>${tds}</tr>`;
+      }).join("")
+    : `<tr><td colspan="${cols.length + (S.editMode ? 2 : 1)}" style="padding:32px;text-align:center;color:var(--fg-dim)">Sin resultados${filter ? ` para "${esc(filter)}"` : ""}</td></tr>`;
+
+  const addRowBar = S.editMode
+    ? `<div class="add-row-bar"><button class="btn-add-row" onclick="startNewRow()"><i class="fas fa-plus"></i> Añadir fila</button></div>`
+    : "";
+
+  const scroll = document.getElementById("tableScroll");
+  if (scroll) {
+    scroll.style.overflowX = "auto";
+    scroll.innerHTML = `
+      <table class="data-tbl">
+        <thead><tr><th class="th-rn">#</th>${editColHdr}${ths}</tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+      ${addRowBar}`;
+  }
+
+  const meta = document.getElementById("dataMeta");
+  if (meta) meta.textContent = filter
+    ? `${vis.length.toLocaleString("es")} de ${rows.length.toLocaleString("es")} filas`
+    : `${rows.length.toLocaleString("es")} filas`;
+
+  const pag = document.getElementById("dataPag");
+  if (pag) {
+    if (pages > 1) {
+      pag.style.display = "flex";
+      const from = (p * pageSize + 1).toLocaleString("es");
+      const to   = Math.min((p + 1) * pageSize, total).toLocaleString("es");
+      pag.innerHTML = `
+        <span>Mostrando <strong>${from}–${to}</strong> de <strong>${total.toLocaleString("es")}</strong></span>
+        <div class="pag-btns">
+          <button class="pag-btn" onclick="changePage(-1)" ${p===0?"disabled":""}>← Anterior</button>
+          <button class="pag-btn" style="cursor:default;pointer-events:none">Pág. ${p+1} / ${pages}</button>
+          <button class="pag-btn" onclick="changePage(1)"  ${p>=pages-1?"disabled":""}>Siguiente →</button>
+        </div>`;
+    } else {
+      pag.style.display = "none";
+    }
+  }
+}
+
+function startEdit(ri) {
+  const tr = document.getElementById(`drow_${ri}`);
+  if (!tr) return;
+  const row = R.rows[ri];
+  // Reemplazar celdas con inputs (omitir td-rn y td-actions)
+  const tds = [...tr.querySelectorAll("td:not(.td-rn):not(.td-actions)")];
+  tds.forEach((td, ci) => {
+    const val = row[ci] ?? "";
+    td.classList.add("editing");
+    td.innerHTML = `<input value="${escAttr(String(val === null || val === undefined ? "" : val))}" data-ci="${ci}">`;
+  });
+  // Cambiar botones de acción
+  tr.querySelector(".row-btn-edit").style.display = "none";
+  tr.querySelector(".row-btn-del").style.display  = "none";
+  const actTd = tr.querySelector(".td-actions");
+  actTd.insertAdjacentHTML("beforeend", `
+    <button class="row-btn row-btn-save"   onclick="saveEdit(${ri})"   title="Guardar"><i class="fas fa-check"></i></button>
+    <button class="row-btn row-btn-cancel" onclick="cancelEdit(${ri})" title="Cancelar"><i class="fas fa-xmark"></i></button>
+  `);
+}
+
+function cancelEdit(ri) {
+  buildTable();
+}
+
+async function saveEdit(ri) {
+  const tr = document.getElementById(`drow_${ri}`);
+  if (!tr) return;
+  const inputs = tr.querySelectorAll("td.editing input");
+  const values = {};
+  inputs.forEach(inp => {
+    const ci = parseInt(inp.dataset.ci);
+    values[R.cols[ci]] = inp.value;
+  });
+
+  const pkCol = getPkCol();
+  if (!pkCol) { toast("No se encontró clave primaria", "error"); return; }
+  const pkIdx = R.cols.indexOf(pkCol);
+  const pkVal = R.rows[ri][pkIdx];
+
+  // Para Redis: no editar la columna "key" ni "type", solo "value"
+  const sendValues = S.dbType === "redis"
+    ? { value: values["value"] ?? "" }
+    : Object.fromEntries(Object.entries(values).filter(([k]) => k !== pkCol && k !== "_id"));
+
+  const res = await post("/api/table/update", {
+    table: S.activeTable, pk_col: pkCol, pk_val: pkVal, values: sendValues
+  });
+  if (res.ok) {
+    R.cols.forEach((col, ci) => { R.rows[ri][ci] = values[col] ?? R.rows[ri][ci]; });
+    toast("Fila actualizada", "success");
+    buildTable();
+  } else {
+    toast(`Error: ${res.error}`, "error");
+  }
+}
+
+async function deleteRow(ri) {
+  const pkCol = getPkCol();
+  if (!pkCol) { toast("No se encontró clave primaria", "error"); return; }
+  const pkIdx = R.cols.indexOf(pkCol);
+  const pkVal = R.rows[ri][pkIdx];
+
+  if (!confirm(`¿Eliminar la fila donde ${pkCol} = ${pkVal}?`)) return;
+
+  const res = await post("/api/table/delete", {
+    table: S.activeTable, pk_col: pkCol, pk_val: pkVal
+  });
+  if (res.ok) {
+    R.rows.splice(ri, 1);
+    toast("Fila eliminada", "success");
+    buildTable();
+  } else {
+    toast(`Error: ${res.error}`, "error");
+  }
+}
+
+function startNewRow() {
+  const scroll = document.getElementById("tableScroll");
+  if (!scroll) return;
+  const tbody = scroll.querySelector("tbody");
+  if (!tbody) return;
+  tbody.querySelector("tr.new-row")?.remove();
+
+  // Columnas editables: omitir _id en MongoDB; en Redis usar key+value
+  const editCols = S.dbType === "redis"
+    ? ["key", "value"]
+    : S.dbType === "mongodb"
+    ? R.cols.filter(c => c !== "_id")
+    : R.cols;
+
+  const inputs = editCols.map(col =>
+    `<td class="editing"><input placeholder="${esc(col)}" data-col="${escAttr(col)}"></td>`
+  ).join("");
+  const actTd = `<td class="td-actions">
+    <button class="row-btn row-btn-save"   onclick="saveNewRow(this)" title="Guardar"><i class="fas fa-check"></i></button>
+    <button class="row-btn row-btn-cancel" onclick="this.closest('tr').remove()" title="Cancelar"><i class="fas fa-xmark"></i></button>
+  </td>`;
+  const tr = document.createElement("tr");
+  tr.className = "new-row";
+  tr.innerHTML = `${actTd}<td class="td-rn">*</td>${inputs}`;
+  tbody.appendChild(tr);
+  tr.querySelector("input")?.focus();
+}
+
+async function saveNewRow(btn) {
+  const tr = btn.closest("tr");
+  const values = {};
+  tr.querySelectorAll("td.editing input").forEach(inp => {
+    if (inp.value !== "") values[inp.dataset.col] = inp.value;
+  });
+  if (!Object.keys(values).length) { toast("Rellena al menos un campo", "error"); return; }
+
+  const res = await post("/api/table/insert", { table: S.activeTable, values });
+  if (res.ok) {
+    toast("Fila añadida", "success");
+    // Recargar datos de la tabla
+    await renderDataView();
+  } else {
+    toast(`Error: ${res.error}`, "error");
+  }
+}
+
+// Init cloud fields
+renderCloudFields();
+
+// ─── Modal de instalación ─────────────────────────────────────────────────────
+let _installState  = { hint: null, retryFn: null };
+let _activeTab     = "docker";
+
+const INSTALL_CMDS = {
+  postgresql: {
+    docker:  { auto: true,  cmds: [{ label: "Levantar contenedor", cmd: "docker run -d --name dbdetector-postgres -e POSTGRES_PASSWORD=pass -e POSTGRES_USER=postgres -p 5432:5432 postgres:16" }] },
+    linux:   { auto: true,  cmds: [{ label: "Instalar", cmd: "sudo apt-get update && sudo apt-get install -y postgresql" }, { label: "Iniciar servicio", cmd: "sudo systemctl start postgresql && sudo systemctl enable postgresql" }] },
+    macos:   { auto: false, cmds: [{ label: "Instalar con Homebrew", cmd: "brew install postgresql@16" }, { label: "Iniciar servicio", cmd: "brew services start postgresql@16" }] },
+    windows: { auto: true, method: "auto", cmds: [
+      { label: "winget (Windows 10/11 — recomendado)", cmd: "winget install --id PostgreSQL.PostgreSQL --silent\nnet start postgresql" },
+      { label: "Chocolatey", cmd: "choco install postgresql --yes\nnet start postgresql" },
+      { label: "PowerShell — EXE silencioso", cmd: "Invoke-WebRequest 'https://get.enterprisedb.com/postgresql/postgresql-16.2-1-windows-x64.exe' -OutFile $env:TEMP\\pg-setup.exe\nStart-Process $env:TEMP\\pg-setup.exe -Wait -ArgumentList '--mode unattended --superpassword pass'" },
+    ], note: "<b>winget</b> viene preinstalado en Windows 10 (build 1809+) y Windows 11. Usuario por defecto: <b>postgres</b>, contraseña: <b>pass</b>. El botón detecta automáticamente qué tienes disponible." },
+  },
+  mysql: {
+    docker:  { auto: true,  cmds: [{ label: "Levantar contenedor", cmd: "docker run -d --name dbdetector-mysql -e MYSQL_ROOT_PASSWORD=pass -e MYSQL_DATABASE=mydb -p 3306:3306 mysql:8" }] },
+    linux:   { auto: true,  cmds: [{ label: "Instalar", cmd: "sudo apt-get update && sudo apt-get install -y mysql-server" }, { label: "Iniciar servicio", cmd: "sudo systemctl start mysql && sudo systemctl enable mysql" }] },
+    macos:   { auto: false, cmds: [{ label: "Instalar con Homebrew", cmd: "brew install mysql" }, { label: "Iniciar servicio", cmd: "brew services start mysql" }] },
+    windows: { auto: true, method: "auto", cmds: [
+      { label: "winget (Windows 10/11 — recomendado)", cmd: "winget install --id Oracle.MySQL --silent\nnet start MySQL80" },
+      { label: "Chocolatey", cmd: "choco install mysql --yes\nnet start MySQL" },
+      { label: "PowerShell — MSI silencioso", cmd: "Invoke-WebRequest 'https://dev.mysql.com/get/Downloads/MySQLInstaller/mysql-installer-community-8.0.36.0.msi' -OutFile $env:TEMP\\mysql-setup.msi\nStart-Process msiexec -Wait -ArgumentList '/i $env:TEMP\\mysql-setup.msi /quiet'" },
+    ], note: "<b>winget</b> viene preinstalado en Windows 10 (build 1809+) y Windows 11. El servicio se llama <b>MySQL80</b> en versiones recientes. El botón detecta automáticamente qué tienes disponible." },
+  },
+  mongodb: {
+    docker:  { auto: true,  cmds: [{ label: "Levantar contenedor", cmd: "docker run -d --name dbdetector-mongo -p 27017:27017 mongo:7" }] },
+    linux:   { auto: true,  cmds: [{ label: "Importar clave y repositorio", cmd: "curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor\necho \"deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/7.0 multiverse\" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list" }, { label: "Instalar e iniciar", cmd: "sudo apt-get update && sudo apt-get install -y mongodb-org\nsudo systemctl start mongod && sudo systemctl enable mongod" }] },
+    macos:   { auto: false, cmds: [{ label: "Instalar con Homebrew", cmd: "brew tap mongodb/brew && brew install mongodb-community@7.0" }, { label: "Iniciar servicio", cmd: "brew services start mongodb/brew/mongodb-community@7.0" }] },
+    windows: { auto: true, method: "auto", cmds: [
+      { label: "winget (Windows 10/11 — recomendado)", cmd: "winget install --id MongoDB.Server --silent\nnet start MongoDB" },
+      { label: "Chocolatey", cmd: "choco install mongodb --yes\nnet start MongoDB" },
+      { label: "PowerShell — MSI silencioso", cmd: "$v='7.0.5'\nInvoke-WebRequest \"https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-$v-signed.msi\" -OutFile $env:TEMP\\mongo.msi\nStart-Process msiexec -Wait -ArgumentList \"/i $env:TEMP\\mongo.msi /quiet ADDLOCAL=all\"\nnet start MongoDB" },
+    ], note: "<b>winget</b> viene preinstalado en Windows 10 (build 1809+) y Windows 11. El botón detecta automáticamente qué tienes disponible." },
+  },
+  redis: {
+    docker:  { auto: true,  cmds: [{ label: "Levantar contenedor", cmd: "docker run -d --name dbdetector-redis -p 6379:6379 redis:7" }] },
+    linux:   { auto: true,  cmds: [{ label: "Instalar e iniciar", cmd: "sudo apt-get update && sudo apt-get install -y redis-server\nsudo systemctl start redis-server && sudo systemctl enable redis-server" }] },
+    macos:   { auto: false, cmds: [{ label: "Instalar con Homebrew", cmd: "brew install redis" }, { label: "Iniciar servicio", cmd: "brew services start redis" }] },
+    windows: { auto: true, method: "auto", cmds: [
+      { label: "winget (Windows 10/11)", cmd: "winget install --id Redis.Redis --silent\nnet start Redis" },
+      { label: "Chocolatey", cmd: "choco install redis-64 --yes\nredis-server --service-install\nnet start Redis" },
+      { label: "WSL2 (si lo tienes instalado)", cmd: "wsl sudo apt-get install -y redis-server\nwsl sudo service redis-server start" },
+    ], note: "Redis no tiene soporte oficial en Windows. <b>winget</b> y <b>Chocolatey</b> usan un port no oficial. La opción más estable es <b>Docker Desktop</b> o <b>WSL2</b>. El botón detecta automáticamente qué tienes disponible." },
+  },
+};
+
+function showInstallModal(hint, pendingCreds, retryFn) {
+  _installState = { hint, retryFn };
+  const isDriver = hint.type === "driver";
+  document.getElementById("installModalIcon").className = `modal-icon ${isDriver ? "driver" : "server"}`;
+  document.getElementById("installModalIcon").innerHTML = isDriver ? '<i class="fas fa-cube"></i>' : '<i class="fas fa-server"></i>';
+  document.getElementById("installProgress").classList.remove("visible");
+
+  if (isDriver) {
+    document.getElementById("installModalTitle").textContent = "Driver de Python no instalado";
+    document.getElementById("installModalDesc").textContent  = `El paquete "${hint.pip}" es necesario para conectarse a esta base de datos.`;
+    document.getElementById("installModalTabs").style.display = "none";
+    document.getElementById("installModalCmds").innerHTML    = cmdBlock("pip install", `pip install ${hint.pip}`);
+    const btn = document.getElementById("installModalBtn");
+    btn.style.display = ""; btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-download"></i> Instalar driver';
+    btn.onclick   = runInstallDriver;
+  } else {
+    const dbName     = DB_NAMES[hint.db] || hint.db;
+    const hasCompose = !!(S.detection?.compose_file);
+    const isConflict = !!(hint.compose_conflict);
+    document.getElementById("installModalTitle").textContent = isConflict
+      ? `Puerto ocupado por otro servidor`
+      : `${dbName} no está corriendo`;
+    document.getElementById("installModalDesc").textContent = isConflict
+      ? `El puerto está en uso por otra instancia de ${dbName} con credenciales distintas. Se levantará el contenedor del proyecto en un puerto libre automáticamente.`
+      : hasCompose
+        ? `Se encontró un docker-compose.yml en el proyecto. Puedes levantar los servicios automáticamente.`
+        : `Elige cómo quieres instalar ${dbName} en tu sistema.`;
+    const showCompose = hasCompose || isConflict;
+    document.getElementById("installModalCmds").innerHTML = showCompose
+      ? cmdBlock("docker compose up -d", `docker compose -f ${S.detection?.compose_file || "docker-compose.yml"} up -d`)
+      : "";
+    document.getElementById("installModalTabs").style.display = showCompose ? "none" : "";
+    if (!showCompose) { _buildServerTabs(hint.db); switchTab("docker"); }
+    const btn = document.getElementById("installModalBtn");
+    btn.style.display = ""; btn.disabled = false;
+    btn.innerHTML = showCompose
+      ? '<i class="fab fa-docker"></i> Levantar servicios del proyecto'
+      : '<i class="fab fa-docker"></i> Instalar con Docker';
+    btn.onclick = showCompose ? runComposeUp : runInstallServer;
+  }
+
+  document.getElementById("installModal").classList.add("open");
+}
+
+function _buildServerTabs(db) {
+  const cfg = INSTALL_CMDS[db] || {};
+  ["docker","linux","macos","windows"].forEach(platform => {
+    const p = cfg[platform] || {};
+    let html = "";
+    (p.cmds || []).forEach(c => { html += cmdBlock(c.label, c.cmd); });
+    if (p.note) html += `<div class="modal-note">${p.note}${p.link ? ` <a href="${p.link}" target="_blank">Descargar <i class="fas fa-external-link-alt" style="font-size:10px"></i></a>` : ""}</div>`;
+    document.getElementById(`tab-${platform}`).innerHTML = html || `<div class="modal-note">No hay instrucciones disponibles para esta plataforma.</div>`;
+  });
+}
+
+function switchTab(tab) {
+  _activeTab = tab;
+  document.querySelectorAll(".platform-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+  document.querySelectorAll(".platform-panel").forEach(p => p.classList.toggle("active", p.id === `tab-${tab}`));
+
+  const hint    = _installState.hint || {};
+  const cfg     = (INSTALL_CMDS[hint.db] || {})[tab] || {};
+  const btn     = document.getElementById("installModalBtn");
+  btn.disabled  = false;
+
+  if (tab === "docker") {
+    btn.style.display = ""; btn.innerHTML = '<i class="fab fa-docker"></i> Instalar con Docker';
+    btn.onclick = runInstallServer;
+  } else if (cfg.auto) {
+    btn.style.display = ""; btn.innerHTML = '<i class="fas fa-terminal"></i> Ejecutar en esta máquina';
+    btn.onclick = () => runInstallNative(tab);
+  } else if (cfg.link) {
+    btn.style.display = ""; btn.innerHTML = '<i class="fas fa-external-link-alt"></i> Abrir descarga oficial';
+    btn.onclick = () => window.open(cfg.link, "_blank");
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+function cmdBlock(label, cmd) {
+  const id = "cmd_" + Math.random().toString(36).slice(2);
+  return `<div class="modal-cmd-block">
+    <div class="modal-cmd-label">${esc(label)}</div>
+    <div class="modal-cmd-code" id="${id}">${esc(cmd)}</div>
+    <button class="modal-copy-btn" onclick="copyCmd('${id}')"><i class="fas fa-copy"></i></button>
+  </div>`;
+}
+
+function copyCmd(id) {
+  navigator.clipboard.writeText(document.getElementById(id)?.textContent || "")
+    .then(() => toast("Copiado al portapapeles", "success"));
+}
+
+function closeInstallModal() {
+  document.getElementById("installModal").classList.remove("open");
+}
+
+async function _runWithProgress(label, apiFn) {
+  const btn = document.getElementById("installModalBtn");
+  const progress = document.getElementById("installProgress");
+  const msg      = document.getElementById("installProgressMsg");
+  btn.disabled = true;
+  progress.classList.add("visible");
+  msg.textContent = label;
+  try {
+    const res = await apiFn();
+    if (res.ok) {
+      toast(`✓ Instalación completada`, "success");
+      closeInstallModal();
+      if (res.credentials && S.detection) {
+        S.detection.credentials = S.detection.credentials || {};
+        S.detection.credentials[_installState.hint.db] = res.credentials;
+      }
+      if (_installState.retryFn) { await delay(700); _installState.retryFn(); }
+    } else {
+      toast(`Error: ${res.error}`, "error");
+      btn.disabled = false;
+    }
+  } catch(e) {
+    toast("Error de red", "error");
+    btn.disabled = false;
+  } finally {
+    progress.classList.remove("visible");
+  }
+}
+
+function runComposeUp() {
+  _runWithProgress("Levantando servicios con docker compose… (puede tardar un momento)", async () => {
+    const res = await post("/api/compose/up", {});
+    if (res.ok && res.credentials) {
+      // Always use credentials from the compose file (host port + env vars),
+      // not the stale ones from JDBC URL detection which may point to a different port.
+      const newCreds = res.credentials;
+      if (res.port_remaps) toast(`Puerto remapeado: ${JSON.stringify(res.port_remaps)}`, "info");
+      _installState.retryFn = async () => {
+        showScreen("screen-scanning");
+        try {
+          setScanStep(3);
+          document.getElementById("scanTitle").textContent  = "Conectando…";
+          document.getElementById("scanDetail").textContent = `${newCreds.host || "localhost"}:${newCreds.port}`;
+          const connRes = await post("/api/connect", { credentials: newCreds });
+          if (!connRes.ok) {
+            toast(`Error al conectar: ${connRes.error}`, "error");
+            showScreen("screen-welcome");
+            resetScanBtn();
+            return;
+          }
+          S.connected = true;
+          await delay(400);
+          setScanStep(4);
+          document.getElementById("scanTitle").textContent = "Cargando tablas…";
+          const tabRes = await fetchJson("/api/tables");
+          if (!tabRes.ok) { toast(`Error cargando tablas: ${tabRes.error}`, "error"); showScreen("screen-welcome"); resetScanBtn(); return; }
+          S.tables = tabRes.tables || [];
+          document.getElementById("scanDetail").textContent = S.tables.length
+            ? `${S.tables.length} tablas encontradas`
+            : "Base de datos vacía (sin tablas aún)";
+          await delay(400);
+          launchDashboard();
+        } catch(e) { toast(e.message, "error"); showScreen("screen-welcome"); resetScanBtn(); }
+      };
+    }
+    return res;
+  });
+}
+
+function runInstallDriver() {
+  const pip = _installState.hint?.pip;
+  if (!pip) return;
+  _runWithProgress(`Instalando ${pip}…`, () => post("/api/install", { package: pip }));
+}
+
+function runInstallServer() {
+  const db = _installState.hint?.db;
+  if (!db) return;
+  _runWithProgress(`Descargando imagen Docker… (puede tardar un minuto)`, () => post("/api/install/server", { db_type: db }));
+}
+
+function runInstallNative(platform) {
+  const db  = _installState.hint?.db;
+  if (!db) return;
+  const cfg = (INSTALL_CMDS[db] || {})[platform] || {};
+  const method = cfg.method || "auto";
+  _runWithProgress(`Instalando ${DB_NAMES[db] || db}… (puede tardar un minuto)`, () =>
+    post("/api/install/server/native", { db_type: db, platform, method })
+  );
+}
+</script>
+</body>
+</html>

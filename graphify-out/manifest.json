@@ -1,0 +1,26 @@
+{
+  "/home/iosef/SISTEMAS/db-detector/connector.py": {
+    "mtime": 1777392806.7382977,
+    "hash": "254bd0852a968e406cbbc4a53ae11b35"
+  },
+  "/home/iosef/SISTEMAS/db-detector/detector.py": {
+    "mtime": 1777393423.3976219,
+    "hash": "c385614d1e3675f8e3a8ebfecd6c5854"
+  },
+  "/home/iosef/SISTEMAS/db-detector/run.py": {
+    "mtime": 1776699734.0,
+    "hash": "f186d1d5e38945101bfe5f7b6274ff53"
+  },
+  "/home/iosef/SISTEMAS/db-detector/server.py": {
+    "mtime": 1777393347.6912646,
+    "hash": "3a6d0149c260bd63b36c405b14f43cb1"
+  },
+  "/home/iosef/SISTEMAS/db-detector/README.md": {
+    "mtime": 1776699743.0,
+    "hash": "2615dba0adb8f38923006b7225ba05d9"
+  },
+  "/home/iosef/SISTEMAS/db-detector/static/index.html": {
+    "mtime": 1777347545.027454,
+    "hash": "5592b93ccc3bc8295d67f7df072f330c"
+  }
+}
