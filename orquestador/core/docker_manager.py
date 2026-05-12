@@ -327,15 +327,28 @@ class DockerManager:
 
         default_port = _DB_DEFAULT_PORTS.get(db_type, 5432)
         port     = ports.get("db_port") or credentials.get("port") or default_port
-        user     = credentials.get("user") or "dbuser"
-        password = credentials.get("password") or "dbpass"
+        user     = credentials.get("user") or ""
+        password = credentials.get("password") or ""
         database = credentials.get("database") or db_type
 
         if db_type == "redis":
             redis_cmd = f'"redis-server --requirepass {password}"' if password else "redis-server"
             content = template.format(port=port, redis_cmd=redis_cmd)
+        elif db_type == "mongodb" and not (user and password):
+            # No-auth MongoDB: omit MONGO_INITDB_ROOT_* so container starts without auth
+            content = (
+                "version: '3.8'\n"
+                "services:\n"
+                "  db:\n"
+                f"    image: mongo:7\n"
+                f"    ports:\n"
+                f"      - \"{port}:27017\"\n"
+                f"    restart: unless-stopped\n"
+            )
         else:
-            content = template.format(port=port, user=user, password=password, database=database)
+            _user = user or "dbuser"
+            _pass = password or "dbpass"
+            content = template.format(port=port, user=_user, password=_pass, database=database)
 
         compose_path = os.path.join(project_path, "docker-compose.yml")
         try:

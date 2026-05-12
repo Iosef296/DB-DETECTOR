@@ -283,8 +283,10 @@ class Orchestrator:
             elif db_type in ("mysql", "mariadb") and port:
                 env["DATABASE_URL"] = f"mysql://{user}:{pwd}@{host}:{port}/{db}"
             elif db_type == "mongodb" and port:
-                env["MONGODB_URI"] = f"mongodb://{user}:{pwd}@{host}:{port}/{db}" if user else f"mongodb://{host}:{port}/{db}"
-                env["DATABASE_URL"] = env["MONGODB_URI"]
+                _mongo_uri = f"mongodb://{user}:{pwd}@{host}:{port}/{db}" if user else f"mongodb://{host}:{port}/{db}"
+                for _k in ("MONGODB_URI", "MONGO_URI", "MONGO_URL", "DATABASE_URL",
+                           "DB_URI", "MONGO_CONNECTION_STRING", "MONGODB_URL"):
+                    env[_k] = _mongo_uri
             elif db_type == "redis" and port:
                 env["REDIS_URL"] = f"redis://:{pwd}@{host}:{port}" if pwd else f"redis://{host}:{port}"
 
