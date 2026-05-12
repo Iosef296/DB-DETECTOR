@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orquestador</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root {
+    --bg:       #0d1117;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --accent:   #2563eb;
+    --running:  #22c55e;
+    --stopped:  #6b7280;
+    --starting: #f59e0b;
+    --error:    #ef4444;
+    --sidebar:  240px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; font-size: 14px; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--sidebar); min-width: var(--sidebar);
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #sidebar-header {
+    padding: 16px 14px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #sidebar-header span { font-weight: 700; letter-spacing: .08em; font-size: 12px; color: var(--muted); }
+  #btn-add { background: var(--accent); border: none; color: #fff; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #btn-add:hover { opacity: .85; }
+  #project-list { flex: 1; overflow-y: auto; }
+  .proj-item {
+    padding: 10px 14px; cursor: pointer; border-left: 3px solid transparent;
+    display: flex; align-items: center; gap: 8px;
+    transition: background .15s;
+  }
+  .proj-item:hover { background: rgba(255,255,255,.04); }
+  .proj-item.active { background: rgba(37,99,235,.15); border-left-color: var(--accent); }
+  .proj-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .proj-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-db { font-size: 11px; color: var(--muted); }
+
+  /* ── Main ── */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Toolbar ── */
+  #toolbar {
+    padding: 10px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { background: rgba(255,255,255,.06); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { opacity: .85; }
+  .btn.danger { border-color: var(--error); color: var(--error); }
+  .btn.danger:hover { background: rgba(239,68,68,.1); }
+  .spacer { flex: 1; }
+
+  /* ── Content ── */
+  #content { flex: 1; overflow-y: auto; padding: 24px; }
+
+  /* ── Table ── */
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table th { text-align: left; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .data-table td { padding: 10px 12px; border-bottom: 1px solid rgba(48,54,61,.5); font-size: 13px; }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td { background: rgba(255,255,255,.03); }
+
+  /* ── Status badges ── */
+  .badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .badge-RUNNING  { background: rgba(34,197,94,.15);  color: var(--running);  }
+  .badge-STOPPED  { background: rgba(107,114,128,.15); color: var(--stopped);  }
+  .badge-STARTING { background: rgba(245,158,11,.15); color: var(--starting); }
+  .badge-ERROR    { background: rgba(239,68,68,.15);   color: var(--error);    }
+
+  /* ── Tabs ── */
+  .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab { padding: 10px 20px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-size: 13px; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  /* ── Cards ── */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .card-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .card-value { font-size: 16px; font-weight: 600; }
+
+  /* ── Query area ── */
+  #query-editor { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 12px; font-family: monospace; font-size: 13px; resize: vertical; min-height: 80px; }
+  #query-editor:focus { outline: none; border-color: var(--accent); }
+  .result-wrap { overflow-x: auto; margin-top: 16px; }
+
+  /* ── Logs ── */
+  #log-area { background: #000; border-radius: 6px; padding: 14px; font-family: monospace; font-size: 12px; height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #d4d4d4; }
+
+  /* ── Modal ── */
+  .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 480px; padding: 24px; }
+  .modal h3 { margin-bottom: 16px; }
+  .modal input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 9px 12px; font-size: 13px; }
+  .modal input:focus { outline: none; border-color: var(--accent); }
+  #preview-box { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-top: 12px; font-size: 12px; color: var(--muted); display: none; }
+  .modal-actions { margin-top: 18px; display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--error); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 200; }
+
+  /* ── Pagination ── */
+  .pager { margin-top: 12px; display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+
+  /* ── Util ── */
+  .gap { display: flex; gap: 8px; }
+  .section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; }
+  a.legacy-link { color: var(--muted); font-size: 12px; text-decoration: none; }
+  a.legacy-link:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside id="sidebar">
+  <div id="sidebar-header">
+    <span>ORQUESTADOR</span>
+    <button id="btn-add" onclick="openModal()"><i class="fa fa-plus"></i> Agregar</button>
+  </div>
+  <div id="project-list"></div>
+</aside>
+
+<!-- Main -->
+<div id="main">
+  <div id="toolbar">
+    <button class="btn primary" onclick="upAll()"><i class="fa fa-play"></i> Levantar todos</button>
+    <button class="btn" onclick="downAll()"><i class="fa fa-stop"></i> Bajar todos</button>
+    <div class="spacer"></div>
+    <a href="/legacy" class="legacy-link">Interfaz clasica DB-Detector &rarr;</a>
+  </div>
+  <div id="content">
+    <div id="panel-list"></div>
+    <div id="panel-detail" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <h3>Agregar Proyecto</h3>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input id="modal-path" type="text" placeholder="/ruta/al/proyecto" style="flex:1">
+      <button class="btn" onclick="detectProject()"><i class="fa fa-search"></i> Detectar</button>
+    </div>
+    <div id="preview-box"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" id="btn-confirm" onclick="confirmAdd()" disabled>Confirmar y Agregar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const state = { projects: [], selected: null, tab: 'info', queryRows: [], queryPage: 0 };
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function fetchAPI(method, endpoint, body) {
+  try {
+    const opts = { method, headers: {'Content-Type':'application/json'} };
+    if (body) opts.body = JSON.stringify(body);
+    const r = await fetch(endpoint, opts);
+    return r.json();
+  } catch(e) {
+    return { error: e.message };
+  }
+}
+
+function toast(msg, dur=4000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', dur);
+}
+
+// ── Load projects ──────────────────────────────────────────────────────────
+async function loadProjects() {
+  const data = await fetchAPI('GET', '/api/projects');
+  if (!Array.isArray(data)) return;
+  state.projects = data;
+  renderSidebar();
+  renderList();
+  if (state.selected) {
+    const found = data.find(p => p.name === state.selected);
+    if (found) renderDetail(found);
+  }
+}
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+function statusColor(s) {
+  return { RUNNING:'#22c55e', STOPPED:'#6b7280', STARTING:'#f59e0b', ERROR:'#ef4444' }[s] || '#6b7280';
+}
+
+function renderSidebar() {
+  const el = document.getElementById('project-list');
+  el.innerHTML = state.projects.map(p => `
+    <div class="proj-item ${p.name === state.selected ? 'active' : ''}" onclick="selectProject('${p.name}')">
+      <div class="proj-dot" style="background:${statusColor(p.status)}"></div>
+      <div>
+        <div class="proj-name">${p.name}</div>
+        <div class="proj-db">${p.db_type || '-'}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ── List panel ─────────────────────────────────────────────────────────────
+function renderList() {
+  const el = document.getElementById('panel-list');
+  if (state.selected) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  if (!state.projects.length) {
+    el.innerHTML = '<p style="color:var(--muted);margin-top:40px;text-align:center">Sin proyectos. Usa + Agregar para registrar uno.</p>';
+    return;
+  }
+  el.innerHTML = `
+    <p class="section-title">Proyectos (${state.projects.length})</p>
+    <table class="data-table">
+      <thead><tr>
+        <th>Nombre</th><th>BD</th><th>Framework</th>
+        <th>App URL</th><th>Puerto DB</th><th>Estado</th><th>Acciones</th>
+      </tr></thead>
+      <tbody>
+      ${state.projects.map(p => `
+        <tr>
+          <td><a href="#" onclick="selectProject('${p.name}');return false" style="color:var(--accent)">${p.name}</a></td>
+          <td>${p.db_type || '-'}</td>
+          <td>${p.framework || '-'}</td>
+          <td>${p.app_port ? `<a href="http://localhost:${p.app_port}" target="_blank" style="color:var(--accent)">localhost:${p.app_port}</a>` : '-'}</td>
+          <td>${p.db_port || '-'}</td>
+          <td><span class="badge badge-${p.status}">${p.status}</span></td>
+          <td>
+            <div class="gap">
+              <button class="btn" title="Up" onclick="projectAction('${p.name}','up')"><i class="fa fa-play"></i></button>
+              <button class="btn" title="Down" onclick="projectAction('${p.name}','down')"><i class="fa fa-stop"></i></button>
+              <button class="btn" title="Restart" onclick="projectAction('${p.name}','restart')"><i class="fa fa-rotate-right"></i></button>
+              <button class="btn danger" title="Remove" onclick="removeProject('${p.name}')"><i class="fa fa-trash"></i></button>
+            </div>
+          </td>
+        </tr>
+      `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ── Detail panel ───────────────────────────────────────────────────────────
+function selectProject(name) {
+  state.selected = name;
+  state.tab = 'info';
+  document.getElementById('panel-list').style.display = 'none';
+  document.getElementById('panel-detail').style.display = '';
+  renderSidebar();
+  const p = state.projects.find(x => x.name === name);
+  if (p) renderDetail(p);
+}
+
+function backToList() {
+  state.selected = null;
+  document.getElementById('panel-detail').style.display = 'none';
+  document.getElementById('panel-list').style.display = '';
+  renderSidebar();
+}
+
+function renderDetail(p) {
+  const el = document.getElementById('panel-detail');
+  const tabs = ['info','queries','logs'];
+  const tabLabels = { info:'Informacion', queries:'Queries', logs:'Logs' };
+
+  let body = '';
+  if (state.tab === 'info') body = renderInfo(p);
+  else if (state.tab === 'queries') body = renderQueries(p);
+  else if (state.tab === 'logs') body = renderLogs(p);
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <button class="btn" onclick="backToList()"><i class="fa fa-arrow-left"></i></button>
+      <span style="font-weight:700;font-size:16px">${p.name}</span>
+      <span class="badge badge-${p.status}">${p.status}</span>
+    </div>
+    <div class="tabs">
+      ${tabs.map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}','${p.name}')">${tabLabels[t]}</div>`).join('')}
+    </div>
+    ${body}
+  `;
+
+  if (state.tab === 'logs') {
+    const la = document.getElementById('log-area');
+    if (la) la.scrollTop = la.scrollHeight;
+  }
+}
+
+function switchTab(tab, name) {
+  state.tab = tab;
+  const p = state.projects.find(x => x.name === name);
+  if (p) renderDetail(p);
+  if (tab === 'logs') loadLogs(name);
+  if (tab === 'queries') loadTables(name);
+}
+
+function renderInfo(p) {
+  const creds = p.credentials || {};
+  return `
+    <div class="card-grid">
+      <div class="card"><div class="card-label">Base de datos</div><div class="card-value">${p.db_type || '-'}</div></div>
+      <div class="card"><div class="card-label">Framework</div><div class="card-value">${p.framework || '-'}</div></div>
+      <div class="card"><div class="card-label">Puerto App</div><div class="card-value">${p.app_port || '-'}</div></div>
+      <div class="card"><div class="card-label">Puerto DB</div><div class="card-value">${p.db_port || '-'}</div></div>
+    </div>
+    ${Object.keys(creds).length ? `
+    <p class="section-title">Credenciales</p>
+    <table class="data-table" style="margin-bottom:24px">
+      <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
+      <tbody>
+        ${Object.entries(creds).filter(([k])=>!['type','is_cloud','raw_url'].includes(k)).map(([k,v])=>`<tr><td>${k}</td><td>${v||'-'}</td></tr>`).join('')}
+      </tbody>
+    </table>` : ''}
+    <div class="gap">
+      <button class="btn primary" onclick="projectAction('${p.name}','up')"><i class="fa fa-play"></i> Up</button>
+      <button class="btn" onclick="projectAction('${p.name}','down')"><i class="fa fa-stop"></i> Down</button>
+      <button class="btn" onclick="projectAction('${p.name}','restart')"><i class="fa fa-rotate-right"></i> Restart</button>
+      <button class="btn danger" onclick="removeProject('${p.name}')"><i class="fa fa-trash"></i> Remove</button>
+    </div>
+  `;
+}
+
+// ── Queries tab ────────────────────────────────────────────────────────────
+let _currentTables = [];
+function renderQueries(p) {
+  const PAGE_SIZE = 50;
+  const rows = state.queryRows;
+  const page = state.queryPage;
+  const slice = rows.slice(page*PAGE_SIZE, (page+1)*PAGE_SIZE);
+  const cols  = rows.length ? Object.keys(rows[0] || {}) : [];
+  let resultHTML = '';
+  if (rows.length) {
+    resultHTML = `
+      <div class="result-wrap">
+        <table class="data-table">
+          <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+          <tbody>${slice.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??''}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div class="pager">
+        Mostrando ${page*PAGE_SIZE+1}-${Math.min((page+1)*PAGE_SIZE,rows.length)} de ${rows.length}
+        <button class="btn" onclick="changePage(-1)" ${page===0?'disabled':''}>&#8592;</button>
+        <button class="btn" onclick="changePage(1)" ${(page+1)*PAGE_SIZE>=rows.length?'disabled':''}>&#8594;</button>
+        <button class="btn" onclick="exportQuery('${p.name}','json')"><i class="fa fa-download"></i> JSON</button>
+        <button class="btn" onclick="exportQuery('${p.name}','csv')"><i class="fa fa-download"></i> CSV</button>
+      </div>
+    `;
+  }
+  return `
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Tabla / Coleccion</label>
+      <select id="table-sel" onchange="fillQuery()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:13px">
+        <option value="">-- seleccionar --</option>
+        ${_currentTables.map(t=>`<option value="${t.name}">${t.name}${t.size?' ('+t.size+')':''}</option>`).join('')}
+      </select>
+    </div>
+    <textarea id="query-editor" placeholder="SELECT * FROM tabla LIMIT 100"></textarea>
+    <div class="gap" style="margin-top:8px">
+      <button class="btn primary" onclick="runQuery('${p.name}')"><i class="fa fa-play"></i> Ejecutar</button>
+    </div>
+    ${resultHTML}
+  `;
+}
+
+async function loadTables(name) {
+  const data = await fetchAPI('GET', `/api/projects/${name}/tables`);
+  _currentTables = data.tables || [];
+  const p = state.projects.find(x => x.name === name);
+  if (p && state.tab === 'queries') renderDetail(p);
+}
+
+function fillQuery() {
+  const sel = document.getElementById('table-sel');
+  const ed  = document.getElementById('query-editor');
+  if (sel && ed && sel.value) {
+    ed.value = `SELECT * FROM "${sel.value}" LIMIT 100`;
+  }
+}
+
+function changePage(dir) {
+  state.queryPage = Math.max(0, state.queryPage + dir);
+  const p = state.projects.find(x => x.name === state.selected);
+  if (p) renderDetail(p);
+}
+
+async function runQuery(name) {
+  const q = document.getElementById('query-editor')?.value?.trim();
+  if (!q) return;
+  const data = await fetchAPI('POST', `/api/projects/${name}/query`, { sql: q });
+  if (data.error) { toast(data.error); return; }
+  const cols = data.columns || [];
+  const rows_raw = data.rows || [];
+  state.queryRows = rows_raw.map(r => Object.fromEntries(cols.map((c,i)=>[c, r[i]])));
+  state.queryPage = 0;
+  const p = state.projects.find(x => x.name === name);
+  if (p) renderDetail(p);
+}
+
+async function exportQuery(name, fmt) {
+  const q = document.getElementById('query-editor')?.value?.trim();
+  const sel = document.getElementById('table-sel')?.value;
+  if (!sel) { toast('Selecciona una tabla primero'); return; }
+  const resp = await fetch(`/api/projects/${name}/export`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ table: sel, format: fmt })
+  });
+  if (!resp.ok) { toast('Error al exportar'); return; }
+  const blob = await resp.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `${sel}.${fmt}`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Logs tab ───────────────────────────────────────────────────────────────
+let _logInterval = null;
+function renderLogs(p) {
+  return `
+    <div class="gap" style="margin-bottom:10px">
+      <button class="btn" onclick="loadLogs('${p.name}')"><i class="fa fa-rotate-right"></i> Actualizar</button>
+      <button class="btn" onclick="clearLogs()"><i class="fa fa-trash"></i> Limpiar</button>
+      <button class="btn" onclick="copyLogs()"><i class="fa fa-copy"></i> Copiar todo</button>
+    </div>
+    <div id="log-area"></div>
+  `;
+}
+
+async function loadLogs(name) {
+  const data = await fetchAPI('GET', `/api/projects/${name}/logs?lines=200`);
+  const el   = document.getElementById('log-area');
+  if (!el) return;
+  const logs = data.logs || [];
+  el.textContent = logs.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLogs() {
+  const el = document.getElementById('log-area');
+  if (el) el.textContent = '';
+}
+
+function copyLogs() {
+  const el = document.getElementById('log-area');
+  if (el) navigator.clipboard.writeText(el.textContent);
+}
+
+// ── Project actions ────────────────────────────────────────────────────────
+async function projectAction(name, action) {
+  const data = await fetchAPI('POST', `/api/projects/${name}/${action}`);
+  if (data.error) { toast(data.error); }
+  await loadProjects();
+}
+
+async function removeProject(name) {
+  if (!confirm(`Eliminar '${name}' del orquestador? No se eliminan los archivos.`)) return;
+  await fetchAPI('DELETE', `/api/projects/${name}`);
+  if (state.selected === name) backToList();
+  await loadProjects();
+}
+
+async function upAll() {
+  const data = await fetchAPI('POST', '/api/projects/up-all');
+  if (data.errors && data.errors.length) toast(`Errores: ${data.errors.map(e=>e.name).join(', ')}`);
+  await loadProjects();
+}
+
+async function downAll() {
+  await fetchAPI('POST', '/api/projects/down-all');
+  await loadProjects();
+}
+
+// ── Modal ──────────────────────────────────────────────────────────────────
+let _detectedProject = null;
+function openModal() {
+  document.getElementById('modal').classList.add('open');
+  document.getElementById('modal-path').value = '';
+  document.getElementById('preview-box').style.display = 'none';
+  document.getElementById('btn-confirm').disabled = true;
+  _detectedProject = null;
+}
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+async function detectProject() {
+  const path = document.getElementById('modal-path').value.trim();
+  if (!path) return;
+  const pb = document.getElementById('preview-box');
+  pb.style.display = 'block'; pb.textContent = 'Detectando...';
+  document.getElementById('btn-confirm').disabled = true;
+  const data = await fetchAPI('POST', '/api/detect', { path });
+  if (data.error) { pb.textContent = `Error: ${data.error}`; return; }
+  _detectedProject = { path, detection: data };
+  const db      = data.primary_db || 'desconocida';
+  const creds   = (data.credentials || {})[db] || {};
+  const appType = (data.app_start || {}).type || '-';
+  pb.innerHTML = `
+    <strong>BD:</strong> ${db.toUpperCase()}<br>
+    <strong>Framework:</strong> ${appType}<br>
+    <strong>Host:</strong> ${creds.host || 'localhost'}  <strong>Puerto:</strong> ${creds.port || '-'}
+  `;
+  document.getElementById('btn-confirm').disabled = false;
+}
+
+async function confirmAdd() {
+  const path = document.getElementById('modal-path').value.trim();
+  if (!path) return;
+  const data = await fetchAPI('POST', '/api/projects', { path });
+  if (data.error) { toast(data.error); return; }
+  closeModal();
+  await loadProjects();
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+setInterval(async () => {
+  await loadProjects();
+  if (state.selected && state.tab === 'logs') loadLogs(state.selected);
+}, 5000);
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadProjects();
+</script>
+</body>
+</html>
