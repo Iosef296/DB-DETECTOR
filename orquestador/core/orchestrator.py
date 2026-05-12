@@ -174,6 +174,19 @@ class Orchestrator:
         if not row:
             return {"ok": False, "error": f"Proyecto '{name}' no encontrado"}
 
+        # Kill any existing app process before starting fresh
+        with self._lock:
+            old_proc = self._procs.pop(name, None)
+        if old_proc and old_proc.poll() is None:
+            try:
+                old_proc.terminate()
+                old_proc.wait(timeout=5)
+            except Exception:
+                try:
+                    old_proc.kill()
+                except Exception:
+                    pass
+
         self._set_status(name, "STARTING")
         path    = row["path"]
         db_type = row.get("db_type")
@@ -234,7 +247,7 @@ class Orchestrator:
         # Start application process
         app_start = detection.get("app_start") or {}
         app_port  = row.get("app_port")
-        app_proc  = self._start_app(name, app_start, creds, db_type)
+        app_proc  = self._start_app(name, app_start, creds, db_type, app_port)
         if app_proc:
             with self._lock:
                 self._procs[name] = app_proc
@@ -243,13 +256,16 @@ class Orchestrator:
         return {"ok": True, "app_url": f"http://localhost:{app_port}"}
 
     def _start_app(self, name: str, app_start: dict,
-                   creds: dict, db_type: str) -> "subprocess.Popen | None":
+                   creds: dict, db_type: str,
+                   app_port: int = None) -> "subprocess.Popen | None":
         if not app_start or not app_start.get("cmd"):
             return None
 
         cmd = app_start["cmd"]
         cwd = app_start.get("cwd", ".")
         env = os.environ.copy()
+        if app_port:
+            env["PORT"] = str(app_port)
 
         host = creds.get("host", "localhost")
         port = creds.get("port", "")
