@@ -269,7 +269,10 @@ class Orchestrator:
                 env["SPRING_DATASOURCE_USERNAME"] = user
                 env["SPRING_DATASOURCE_PASSWORD"] = pwd
             elif db_type == "mongodb" and port:
-                uri = f"mongodb://{user}:{pwd}@{host}:{port}/{db}" if user else f"mongodb://{host}:{port}/{db}"
+                if user and pwd:
+                    uri = f"mongodb://{user}:{pwd}@{host}:{port}/{db}?authSource=admin"
+                else:
+                    uri = f"mongodb://{host}:{port}/{db}"
                 env["SPRING_DATA_MONGODB_URI"] = uri
             elif db_type == "redis" and port:
                 env["SPRING_DATA_REDIS_HOST"] = host
@@ -283,7 +286,10 @@ class Orchestrator:
             elif db_type in ("mysql", "mariadb") and port:
                 env["DATABASE_URL"] = f"mysql://{user}:{pwd}@{host}:{port}/{db}"
             elif db_type == "mongodb" and port:
-                _mongo_uri = f"mongodb://{user}:{pwd}@{host}:{port}/{db}" if user else f"mongodb://{host}:{port}/{db}"
+                if user and pwd:
+                    _mongo_uri = f"mongodb://{user}:{pwd}@{host}:{port}/{db}?authSource=admin"
+                else:
+                    _mongo_uri = f"mongodb://{host}:{port}/{db}"
                 for _k in ("MONGODB_URI", "MONGO_URI", "MONGO_URL", "DATABASE_URL",
                            "DB_URI", "MONGO_CONNECTION_STRING", "MONGODB_URL"):
                     env[_k] = _mongo_uri
