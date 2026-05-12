@@ -458,6 +458,19 @@ class Orchestrator:
         if not creds:
             return None
 
+        # Build raw_url for MongoDB so connector uses auth + authSource=admin
+        creds = dict(creds)
+        if (creds.get("type") or row.get("db_type") or "").lower() == "mongodb":
+            host = creds.get("host", "localhost")
+            port = creds.get("port", 27017)
+            user = creds.get("user", "")
+            pwd  = creds.get("password", "")
+            db   = creds.get("database", "")
+            if user and pwd:
+                creds["raw_url"] = f"mongodb://{user}:{pwd}@{host}:{port}/{db}?authSource=admin"
+            else:
+                creds["raw_url"] = f"mongodb://{host}:{port}/{db}"
+
         conn = DBConnection(creds)
         result = conn.connect()
         if result.get("ok"):
