@@ -280,7 +280,7 @@ class DockerManager:
 
         try:
             r = subprocess.run(
-                ["docker", "compose", "-f", compose_file, "down"],
+                ["docker", "compose", "-f", compose_file, "down", "--volumes"],
                 capture_output=True, text=True, timeout=60,
                 cwd=os.path.dirname(compose_file)
             )
