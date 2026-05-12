@@ -232,6 +232,21 @@ class DockerManager:
                 capture_output=True, text=True, timeout=120,
                 cwd=os.path.dirname(compose_file)
             )
+            # Container conflict: already exists from previous up attempt → down + retry
+            if result.returncode != 0 and any(
+                k in (result.stderr + result.stdout)
+                for k in ("already in use", "Conflict", "already exists")
+            ):
+                subprocess.run(
+                    ["docker", "compose", "-f", compose_file, "down"],
+                    capture_output=True, text=True, timeout=60,
+                    cwd=os.path.dirname(compose_file)
+                )
+                result = subprocess.run(
+                    ["docker", "compose", "-f", compose_file, "up", "-d"],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=os.path.dirname(compose_file)
+                )
             if result.returncode != 0:
                 if original_content is not None:
                     with open(compose_file, "w") as f:
