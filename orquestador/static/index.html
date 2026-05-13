@@ -323,13 +323,13 @@ function renderInfo(p) {
       <div class="card"><div class="card-label">Framework</div><div class="card-value">${p.framework || '-'}</div></div>
       <div class="card"><div class="card-label">Puerto App</div><div class="card-value">${p.app_port || '-'}</div></div>
       <div class="card"><div class="card-label">Puerto DB</div><div class="card-value">${p.db_port || '-'}</div></div>
+      ${p.app_port ? `<div class="card"><div class="card-label">App URL</div><div class="card-value" style="font-size:13px"><a href="http://localhost:${p.app_port}" target="_blank" style="color:var(--accent)">http://localhost:${p.app_port}</a></div></div>` : ''}
     </div>
     ${Object.keys(creds).length ? `
     <p class="section-title">Credenciales</p>
     <table class="data-table" style="margin-bottom:24px">
       <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
       <tbody>
-        ${p.app_port ? `<tr><td>url app</td><td><a href="http://localhost:${p.app_port}" target="_blank" style="color:inherit;text-decoration:none;">http://localhost:${p.app_port}</a></td></tr>` : ''}
         ${['database','user','password'].filter(k=>creds[k]!=null).map(k=>`<tr><td>${k}</td><td>${creds[k]||'-'}</td></tr>`).join('')}
       </tbody>
     </table>` : ''}
