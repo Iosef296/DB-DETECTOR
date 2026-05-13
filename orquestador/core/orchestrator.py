@@ -240,7 +240,7 @@ class Orchestrator:
             host = creds.get("host", "localhost")
             port = creds.get("port")
             if port and host in ("localhost", "127.0.0.1"):
-                ready = self.docker.wait_for_port(host, int(port), timeout=30)
+                ready = self.docker.wait_for_port("localhost", int(port), timeout=30)
                 if not ready:
                     self._set_status(name, "ERROR")
                     return {"ok": False, "error": f"Contenedor arrancó pero puerto {port} no responde"}
@@ -276,6 +276,8 @@ class Orchestrator:
             env["SERVER_PORT"] = str(app_port)  # Spring Boot
 
         host = creds.get("host", "localhost")
+        if host == "127.0.0.1":
+            host = "localhost"
         port = creds.get("port", "")
         db   = creds.get("database", "")
         user = creds.get("user", "")
