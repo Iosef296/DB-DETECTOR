@@ -235,7 +235,7 @@ def _generate_compose_file(project_path, db_type, creds):
         content = template.format(port=port, user=user, password=password, database=database)
     compose_path = os.path.join(project_path, "docker-compose.yml")
     try:
-        with open(compose_path, "w") as f:
+        with open(compose_path, "w", encoding="utf-8") as f:
             f.write(content)
         return compose_path
     except Exception:
@@ -371,20 +371,20 @@ def api_compose_up():
         try:
             patched_content, port_remaps = _patch_compose_ports(compose_file)
             if port_remaps:
-                with open(compose_file) as f:
+                with open(compose_file, encoding="utf-8", errors="replace") as f:
                     original_content = f.read()
-                with open(compose_file, "w") as f:
+                with open(compose_file, "w", encoding="utf-8") as f:
                     f.write(patched_content)
         except Exception as e:
             return jsonify({"ok": False, "error": f"Error al analizar docker-compose.yml: {e}"})
     try:
         result = subprocess.run(
             ["docker", "compose", "-f", compose_file, "up", "-d"],
-            capture_output=True, text=True, timeout=120, cwd=project_dir
+            capture_output=True, encoding="utf-8", errors="replace", timeout=120, cwd=project_dir
         )
         if result.returncode != 0:
             if original_content is not None:
-                with open(compose_file, "w") as f:
+                with open(compose_file, "w", encoding="utf-8") as f:
                     f.write(original_content)
             return jsonify({"ok": False, "error": result.stderr.strip() or result.stdout.strip()})
         base_creds   = dict(_state.get("credentials") or {})
@@ -471,7 +471,7 @@ def api_install():
     try:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", package],
-            capture_output=True, text=True, timeout=120
+            capture_output=True, encoding="utf-8", errors="replace", timeout=120
         )
         if result.returncode == 0:
             return jsonify({"ok": True, "output": result.stdout[-2000:]})
@@ -502,7 +502,7 @@ def api_app_start():
         proc = subprocess.Popen(
             cmd, shell=True, cwd=cwd, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            encoding="utf-8", errors="replace", bufsize=1,
         )
         _state["app_proc"] = proc
 
@@ -599,7 +599,7 @@ def api_install_server():
         for k, v in cfg["env"].items():
             cmd += ["-e", f"{k}={v}"]
         cmd.append(cfg["image"])
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=120)
         if result.returncode != 0:
             return jsonify({"ok": False, "error": result.stderr.strip() or result.stdout.strip()})
     host_port = int(cfg["ports"][0].split(":")[0])

@@ -103,7 +103,7 @@ def _port_in_use(port: int) -> bool:
 
 
 def _patch_compose_ports(compose_file: str) -> tuple[str, dict]:
-    with open(compose_file) as f:
+    with open(compose_file, encoding="utf-8", errors="replace") as f:
         content = f.read()
     pattern = re.compile(r'(["\']?)(\d+)(:)(\d+)(["\']?)')
     port_remaps = {}
@@ -153,7 +153,7 @@ def _get_compose_running_ports(compose_file: str) -> dict:
 
 def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
     try:
-        with open(compose_file) as f:
+        with open(compose_file, encoding="utf-8", errors="replace") as f:
             content = f.read()
     except Exception:
         return {}
@@ -219,9 +219,9 @@ class DockerManager:
             try:
                 patched_content, port_remaps = _patch_compose_ports(compose_file)
                 if port_remaps:
-                    with open(compose_file) as f:
+                    with open(compose_file, encoding="utf-8", errors="replace") as f:
                         original_content = f.read()
-                    with open(compose_file, "w") as f:
+                    with open(compose_file, "w", encoding="utf-8") as f:
                         f.write(patched_content)
             except Exception as e:
                 return {"ok": False, "error": f"Error al analizar docker-compose.yml: {e}"}
@@ -249,7 +249,7 @@ class DockerManager:
                 )
             if result.returncode != 0:
                 if original_content is not None:
-                    with open(compose_file, "w") as f:
+                    with open(compose_file, "w", encoding="utf-8") as f:
                         f.write(original_content)
                 return {"ok": False, "error": result.stderr.strip() or result.stdout.strip()}
             response = {"ok": True, "output": result.stdout.strip(),
@@ -352,7 +352,7 @@ class DockerManager:
 
         compose_path = os.path.join(project_path, "docker-compose.yml")
         try:
-            with open(compose_path, "w") as f:
+            with open(compose_path, "w", encoding="utf-8") as f:
                 f.write(content)
             return compose_path
         except Exception:
