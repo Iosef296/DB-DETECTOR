@@ -219,8 +219,9 @@ class Orchestrator:
                     compose_info["host_port"] = running_ports[container_port]
 
             if compose_info.get("host_port"):
+                real_db_port = compose_info["host_port"]
                 creds = dict(creds)
-                creds["port"] = compose_info["host_port"]
+                creds["port"] = real_db_port
                 if compose_info.get("user"):
                     creds["user"] = compose_info["user"]
                 if compose_info.get("password"):
@@ -229,8 +230,8 @@ class Orchestrator:
                     creds["database"] = compose_info["database"]
                 con = self._con()
                 con.execute(
-                    "UPDATE projects SET credentials = ?, updated_at = ? WHERE name = ?",
-                    (json.dumps(creds), self._now(), name)
+                    "UPDATE projects SET credentials = ?, db_port = ?, updated_at = ? WHERE name = ?",
+                    (json.dumps(creds), real_db_port, self._now(), name)
                 )
                 con.commit()
                 con.close()
@@ -253,7 +254,13 @@ class Orchestrator:
                 self._procs[name] = app_proc
 
         self._set_status(name, "RUNNING")
-        return {"ok": True, "app_url": f"http://localhost:{app_port}"}
+        updated = self._get_row(name)
+        return {
+            "ok":      True,
+            "app_url": f"http://localhost:{app_port}",
+            "app_port": app_port,
+            "db_port":  updated.get("db_port"),
+        }
 
     def _start_app(self, name: str, app_start: dict,
                    creds: dict, db_type: str,
