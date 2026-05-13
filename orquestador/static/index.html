@@ -329,7 +329,8 @@ function renderInfo(p) {
     <table class="data-table" style="margin-bottom:24px">
       <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
       <tbody>
-        ${Object.entries(creds).filter(([k])=>!['type','is_cloud','raw_url'].includes(k)).map(([k,v])=>`<tr><td>${k}</td><td>${v||'-'}</td></tr>`).join('')}
+        ${p.app_port ? `<tr><td>url app</td><td><a href="http://localhost:${p.app_port}" target="_blank">http://localhost:${p.app_port}</a></td></tr>` : ''}
+        ${['database','user','password'].filter(k=>creds[k]!=null).map(k=>`<tr><td>${k}</td><td>${creds[k]||'-'}</td></tr>`).join('')}
       </tbody>
     </table>` : ''}
     <div class="gap">
