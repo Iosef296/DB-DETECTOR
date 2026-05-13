@@ -606,16 +606,18 @@ class DatabaseDetector:
 
         # ── Spring Boot (Maven) ───────────────────────────────────────────────
         if (root / "mvnw").exists():
+            _mvnw = "mvnw.cmd" if _IS_WINDOWS else "./mvnw"
             return {"type": "springboot", "label": "Spring Boot (Maven Wrapper)",
-                    "cmd": "./mvnw spring-boot:run", "cwd": str(root)}
+                    "cmd": f"{_mvnw} spring-boot:run", "cwd": str(root)}
         if (root / "pom.xml").exists() and shutil.which("mvn"):
             return {"type": "springboot", "label": "Spring Boot (Maven)",
                     "cmd": "mvn spring-boot:run", "cwd": str(root)}
 
         # ── Spring Boot (Gradle) ──────────────────────────────────────────────
         if (root / "gradlew").exists():
+            _gradlew = "gradlew.bat" if _IS_WINDOWS else "./gradlew"
             return {"type": "springboot", "label": "Spring Boot (Gradle Wrapper)",
-                    "cmd": "./gradlew bootRun", "cwd": str(root)}
+                    "cmd": f"{_gradlew} bootRun", "cwd": str(root)}
         has_gradle_build = (root / "build.gradle").exists() or (root / "build.gradle.kts").exists()
         if has_gradle_build and shutil.which("gradle"):
             return {"type": "springboot", "label": "Spring Boot (Gradle)",
@@ -631,7 +633,7 @@ class DatabaseDetector:
         pkg = root / "package.json"
         if pkg.exists():
             try:
-                pkg_data = json.loads(pkg.read_text(errors="replace"))
+                pkg_data = json.loads(pkg.read_text(encoding="utf-8", errors="replace"))
                 scripts  = pkg_data.get("scripts", {})
                 mgr = "npm"
                 if (root / "yarn.lock").exists():    mgr = "yarn"

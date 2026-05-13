@@ -356,7 +356,7 @@ class Orchestrator:
             proc = subprocess.Popen(
                 cmd, shell=True, cwd=cwd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, bufsize=1,
+                encoding="utf-8", errors="replace", bufsize=1,
             )
 
             def _reader():

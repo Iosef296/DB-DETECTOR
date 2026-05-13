@@ -70,7 +70,8 @@ class DBConnection:
                 self._attach_install_hint(result)
             return result
         except Exception as e:
-            result = {"ok": False, "error": str(e)}
+            import traceback as _tb
+            result = {"ok": False, "error": str(e), "traceback": _tb.format_exc()}
             self._attach_install_hint(result)
             return result
 
@@ -94,15 +95,20 @@ class DBConnection:
             psycopg2 = importlib.import_module("psycopg2")
         except ImportError:
             return {"ok": False, "error": "psycopg2 no instalado. Ejecuta: pip install psycopg2-binary"}
+        import os as _os
+        _os.environ.setdefault("PGCLIENTENCODING", "UTF8")
         c = self.creds
-        self._conn = psycopg2.connect(
-            host=c.get("host", "localhost"),
-            port=int(c.get("port", 5432)),
-            user=c.get("user", ""),
-            password=c.get("password", ""),
-            database=c.get("database", ""),
-            connect_timeout=5,
-        )
+        try:
+            self._conn = psycopg2.connect(
+                host=c.get("host", "localhost"),
+                port=int(c.get("port", 5432)),
+                user=c.get("user", ""),
+                password=c.get("password", ""),
+                database=c.get("database", ""),
+                connect_timeout=5,
+            )
+        except UnicodeDecodeError:
+            return {"ok": False, "error": "connection refused"}
         self._conn.autocommit = True
         self._cursor = self._conn.cursor()
         return {"ok": True}

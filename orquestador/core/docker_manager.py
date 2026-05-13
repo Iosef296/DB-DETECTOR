@@ -129,7 +129,7 @@ def _get_compose_running_ports(compose_file: str) -> dict:
     try:
         r = subprocess.run(
             ["docker", "compose", "-f", compose_file, "ps", "--format", "json"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, encoding="utf-8", errors="replace", timeout=10
         )
         if r.returncode != 0 or not r.stdout.strip():
             return {}
@@ -184,7 +184,7 @@ class DockerManager:
         net = f"orq_{project_name}_net"
         r = subprocess.run(
             ["docker", "network", "create", net],
-            capture_output=True, text=True
+            capture_output=True, encoding="utf-8", errors="replace"
         )
         # returncode 1 with "already exists" is fine
         return r.returncode == 0 or "already exists" in r.stderr
@@ -193,7 +193,7 @@ class DockerManager:
         net = f"orq_{project_name}_net"
         r = subprocess.run(
             ["docker", "network", "rm", net],
-            capture_output=True, text=True
+            capture_output=True, encoding="utf-8", errors="replace"
         )
         return r.returncode == 0
 
@@ -229,7 +229,7 @@ class DockerManager:
         try:
             result = subprocess.run(
                 ["docker", "compose", "-f", compose_file, "up", "-d"],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                 cwd=os.path.dirname(compose_file)
             )
             # Container conflict: already exists from previous up attempt → down + retry
@@ -239,12 +239,12 @@ class DockerManager:
             ):
                 subprocess.run(
                     ["docker", "compose", "-f", compose_file, "down"],
-                    capture_output=True, text=True, timeout=60,
+                    capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                     cwd=os.path.dirname(compose_file)
                 )
                 result = subprocess.run(
                     ["docker", "compose", "-f", compose_file, "up", "-d"],
-                    capture_output=True, text=True, timeout=120,
+                    capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                     cwd=os.path.dirname(compose_file)
                 )
             if result.returncode != 0:
@@ -281,7 +281,7 @@ class DockerManager:
         try:
             r = subprocess.run(
                 ["docker", "compose", "-f", compose_file, "down", "--volumes"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                 cwd=os.path.dirname(compose_file)
             )
             if r.returncode != 0:
@@ -303,7 +303,7 @@ class DockerManager:
         try:
             r = subprocess.run(
                 ["docker", "compose", "-f", compose_file, "ps", "--format", "json"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, encoding="utf-8", errors="replace", timeout=10,
                 cwd=os.path.dirname(compose_file)
             )
             if r.returncode != 0 or not r.stdout.strip():
