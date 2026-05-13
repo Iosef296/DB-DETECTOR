@@ -147,8 +147,38 @@ class Orchestrator:
     _SPLIT_NAMES   = {"backend", "frontend", "api", "client", "server", "web",
                       "app", "ui", "spa", "service", "services"}
 
+    _BE_SERVER_DEPS = {
+        "express", "fastify", "koa", "hapi", "nestjs", "@nestjs/core",
+        "pg", "mysql2", "mysql", "mongoose", "sequelize", "typeorm",
+        "prisma", "@prisma/client", "knex", "redis", "mongodb",
+    }
+    _BE_SERVER_DIRS = {"server", "backend", "api", "services", "service"}
+
     def _has_be(self, path: str) -> bool:
-        return any(os.path.exists(os.path.join(path, f)) for f in self._BE_INDICATORS)
+        # Explicit BE files at root
+        if any(os.path.exists(os.path.join(path, f)) for f in self._BE_INDICATORS):
+            return True
+        # docker-compose.yml at root = has DB services
+        for cf in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+            if os.path.exists(os.path.join(path, cf)):
+                return True
+        # server/ or backend/ subfolder with package.json
+        for d in self._BE_SERVER_DIRS:
+            sub_pkg = os.path.join(path, d, "package.json")
+            if os.path.exists(sub_pkg):
+                return True
+        # Root package.json has backend deps
+        pkg = os.path.join(path, "package.json")
+        if os.path.exists(pkg):
+            try:
+                import json as _json
+                data = _json.loads(open(pkg, encoding="utf-8", errors="replace").read())
+                deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+                if self._BE_SERVER_DEPS & set(deps.keys()):
+                    return True
+            except Exception:
+                pass
+        return False
 
     def _has_fe(self, path: str) -> bool:
         pkg = os.path.join(path, "package.json")
