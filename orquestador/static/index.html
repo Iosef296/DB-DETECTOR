@@ -132,6 +132,7 @@
   <div id="sidebar-header">
     <span>ORQUESTADOR</span>
     <button id="btn-add" onclick="openModal()"><i class="fa fa-plus"></i> Agregar</button>
+    <button id="btn-add" onclick="openScanModal()" style="background:var(--surface);border:1px solid var(--border)"><i class="fa fa-folder-open"></i> Escanear Carpeta</button>
   </div>
   <div id="project-list"></div>
 </aside>
@@ -162,6 +163,19 @@
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Cancelar</button>
       <button class="btn primary" id="btn-confirm" onclick="confirmAdd()" disabled>Confirmar y Agregar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="modal-scan">
+  <div class="modal">
+    <h3>Escanear Carpeta</h3>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--muted)">Detecta y agrega automáticamente todos los proyectos dentro de una carpeta.</div>
+    <input id="scan-path" type="text" placeholder="/ruta/carpeta" style="width:100%;margin-bottom:12px">
+    <div id="scan-result"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeScanModal()">Cancelar</button>
+      <button class="btn primary" onclick="confirmScan()"><i class="fa fa-search"></i> Escanear</button>
     </div>
   </div>
 </div>
@@ -528,6 +542,32 @@ async function confirmAdd() {
   const data = await fetchAPI('POST', '/api/projects', { path });
   if (data.error) { toast(data.error); return; }
   closeModal();
+  await loadProjects();
+}
+
+// ── Scan Folder ────────────────────────────────────────────────────────────
+function openScanModal() {
+  document.getElementById('modal-scan').classList.add('open');
+  document.getElementById('scan-path').value = '';
+  document.getElementById('scan-result').innerHTML = '';
+}
+function closeScanModal() { document.getElementById('modal-scan').classList.remove('open'); }
+
+async function confirmScan() {
+  const folder = document.getElementById('scan-path').value.trim();
+  if (!folder) return;
+  const res = document.getElementById('scan-result');
+  res.textContent = 'Escaneando...';
+  const data = await fetchAPI('POST', '/api/projects/scan-folder', { folder });
+  if (data.error) { res.textContent = `Error: ${data.error}`; return; }
+  const added   = (data.added   || []).map(p => p.name).join(', ') || 'ninguno';
+  const skipped = (data.skipped || []).length;
+  const errors  = (data.errors  || []).length;
+  res.innerHTML = `
+    <div style="color:#4ade80;margin-bottom:4px"><strong>Agregados (${data.added.length}):</strong> ${added}</div>
+    ${skipped ? `<div style="color:var(--muted)">Omitidos (ya existen o no son proyectos): ${skipped}</div>` : ''}
+    ${errors  ? `<div style="color:#f87171">Errores: ${(data.errors||[]).map(e=>e.name).join(', ')}</div>` : ''}
+  `;
   await loadProjects();
 }
 

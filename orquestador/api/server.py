@@ -52,6 +52,18 @@ def api_projects_add():
     return jsonify(result), 201
 
 
+@app.route("/api/projects/scan-folder", methods=["POST"])
+def api_projects_scan_folder():
+    data = request.json or {}
+    folder = data.get("folder", "").strip()
+    if not folder:
+        return jsonify({"error": "Proporciona una carpeta"}), 400
+    result = orchestrator.scan_folder(folder)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result)
+
+
 @app.route("/api/projects", methods=["GET"])
 def api_projects_list():
     return jsonify(orchestrator.list_projects())

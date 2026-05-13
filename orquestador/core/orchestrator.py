@@ -129,6 +129,41 @@ class Orchestrator:
             "status":    "STOPPED",
         }
 
+    def scan_folder(self, folder: str) -> dict:
+        """Scan a folder and auto-add all sub-projects found."""
+        folder = os.path.abspath(os.path.expanduser(folder))
+        if not os.path.isdir(folder):
+            return {"ok": False, "error": f"Carpeta no encontrada: {folder}"}
+
+        added, skipped, errors = [], [], []
+        try:
+            entries = sorted(os.scandir(folder), key=lambda e: e.name)
+        except PermissionError as e:
+            return {"ok": False, "error": str(e)}
+
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            path = entry.path
+            # Quick check: is it a recognizable project?
+            indicators = [
+                "package.json", "pom.xml", "build.gradle", "build.gradle.kts",
+                "gradlew", "mvnw", "manage.py", "requirements.txt",
+                "Gemfile", "artisan", "go.mod", "main.go",
+            ]
+            if not any(os.path.exists(os.path.join(path, f)) for f in indicators):
+                skipped.append(entry.name)
+                continue
+            result = self.add_project(path)
+            if result.get("ok"):
+                added.append(result)
+            elif "ya existe" in result.get("error", ""):
+                skipped.append(entry.name)
+            else:
+                errors.append({"name": entry.name, "error": result.get("error")})
+
+        return {"ok": True, "added": added, "skipped": skipped, "errors": errors}
+
     def remove_project(self, name: str) -> dict:
         row = self._get_row(name)
         if not row:
