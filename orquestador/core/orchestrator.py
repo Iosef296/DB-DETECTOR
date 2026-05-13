@@ -129,8 +129,45 @@ class Orchestrator:
             "status":    "STOPPED",
         }
 
+    # ── Scan helpers ──────────────────────────────────────────────────────────
+
+    _BE_INDICATORS = [
+        "pom.xml", "build.gradle", "build.gradle.kts", "gradlew", "mvnw",
+        "manage.py", "requirements.txt", "Gemfile", "artisan", "go.mod", "main.go",
+    ]
+    _FE_INDICATORS = ["package.json"]
+    _FE_FRAMEWORKS = {"react", "vue", "vite", "angular", "next", "nuxt", "svelte",
+                      "solid", "preact", "astro", "remix", "gatsby"}
+    _SPLIT_NAMES   = {"backend", "frontend", "api", "client", "server", "web",
+                      "app", "ui", "spa", "service", "services"}
+
+    def _has_be(self, path: str) -> bool:
+        return any(os.path.exists(os.path.join(path, f)) for f in self._BE_INDICATORS)
+
+    def _has_fe(self, path: str) -> bool:
+        pkg = os.path.join(path, "package.json")
+        if not os.path.exists(pkg):
+            return False
+        try:
+            import json as _json
+            data = _json.loads(open(pkg, encoding="utf-8", errors="replace").read())
+            deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+            return bool(self._FE_FRAMEWORKS & set(deps.keys()))
+        except Exception:
+            return True  # has package.json, assume frontend
+
+    def _add_one(self, path: str, added: list, skipped: list, errors: list):
+        name = Path(path).name
+        result = self.add_project(path)
+        if result.get("ok"):
+            added.append(result)
+        elif "ya existe" in result.get("error", ""):
+            skipped.append(name)
+        else:
+            errors.append({"name": name, "error": result.get("error")})
+
     def scan_folder(self, folder: str) -> dict:
-        """Scan a folder and auto-add all sub-projects found."""
+        """Scan a folder and auto-add all sub-projects, splitting BE/FE when present."""
         folder = os.path.abspath(os.path.expanduser(folder))
         if not os.path.isdir(folder):
             return {"ok": False, "error": f"Carpeta no encontrada: {folder}"}
@@ -145,22 +182,31 @@ class Orchestrator:
             if not entry.is_dir():
                 continue
             path = entry.path
-            # Quick check: is it a recognizable project?
-            indicators = [
-                "package.json", "pom.xml", "build.gradle", "build.gradle.kts",
-                "gradlew", "mvnw", "manage.py", "requirements.txt",
-                "Gemfile", "artisan", "go.mod", "main.go",
-            ]
-            if not any(os.path.exists(os.path.join(path, f)) for f in indicators):
-                skipped.append(entry.name)
+
+            # Check for BE/FE sub-split inside this dir
+            try:
+                sub_entries = [e for e in os.scandir(path) if e.is_dir()]
+            except PermissionError:
+                sub_entries = []
+
+            split_subs = [e for e in sub_entries
+                          if e.name.lower() in self._SPLIT_NAMES
+                          and (self._has_be(e.path) or self._has_fe(e.path))]
+
+            if split_subs:
+                # Has named BE/FE subdirs → add each separately
+                for sub in split_subs:
+                    self._add_one(sub.path, added, skipped, errors)
                 continue
-            result = self.add_project(path)
-            if result.get("ok"):
-                added.append(result)
-            elif "ya existe" in result.get("error", ""):
-                skipped.append(entry.name)
+
+            # Has both BE and FE at root → split by type
+            is_be = self._has_be(path)
+            is_fe = self._has_fe(path)
+
+            if is_be or is_fe:
+                self._add_one(path, added, skipped, errors)
             else:
-                errors.append({"name": entry.name, "error": result.get("error")})
+                skipped.append(entry.name)
 
         return {"ok": True, "added": added, "skipped": skipped, "errors": errors}
 
