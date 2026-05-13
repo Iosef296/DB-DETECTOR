@@ -333,7 +333,7 @@ function renderInfo(p) {
   const creds = p.credentials || {};
   return `
     <div class="card-grid">
-      <div class="card"><div class="card-label">Base de datos</div><div class="card-value">${p.db_type || '-'}</div></div>
+      <div class="card"><div class="card-label">Base de datos</div><div class="card-value">${p.db_type || (p.framework==='frontend'?'Frontend':'Sin DB')}</div></div>
       <div class="card"><div class="card-label">Framework</div><div class="card-value">${p.framework || '-'}</div></div>
       <div class="card"><div class="card-label">Puerto App</div><div class="card-value">${p.app_port || '-'}</div></div>
       <div class="card"><div class="card-label">Puerto DB</div><div class="card-value">${p.db_port || '-'}</div></div>

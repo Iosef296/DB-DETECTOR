@@ -100,6 +100,12 @@ class Orchestrator:
         framework = app_start.get("type")
         creds     = detection.get("credentials", {}).get(db_type) if db_type else {}
 
+        # Frontend-only project: has FE framework, no BE indicators → clear DB fields
+        if self._has_fe(path) and not self._has_be(path):
+            db_type = None
+            creds   = {}
+            framework = framework or "frontend"
+
         db_port, app_port = self.port_manager.assign_ports(name)
 
         now = self._now()
@@ -274,18 +280,23 @@ class Orchestrator:
         creds   = row.get("credentials") or {}
         db_port = row.get("db_port")
 
-        self.docker.create_network(name)
+        # Frontend-only: skip Docker entirely
+        is_frontend_only = not db_type
+
+        if not is_frontend_only:
+            self.docker.create_network(name)
 
         detection = row.get("detection") or {}
         compose_file = detection.get("compose_file")
 
-        if not compose_file or not os.path.isfile(compose_file):
-            if db_type:
-                compose_file = self.docker.generate_compose(
-                    path, db_type, creds, {"db_port": db_port}
-                )
+        if not is_frontend_only:
+            if not compose_file or not os.path.isfile(compose_file):
+                if db_type:
+                    compose_file = self.docker.generate_compose(
+                        path, db_type, creds, {"db_port": db_port}
+                    )
 
-        if compose_file and os.path.isfile(compose_file):
+        if not is_frontend_only and compose_file and os.path.isfile(compose_file):
             result = self.docker.up(path, f"orq_{name}_net", {"db_port": db_port})
             if not result.get("ok"):
                 self._set_status(name, "ERROR")
