@@ -273,6 +273,7 @@ class Orchestrator:
         env = os.environ.copy()
         if app_port:
             env["PORT"] = str(app_port)
+            env["SERVER_PORT"] = str(app_port)  # Spring Boot
 
         host = creds.get("host", "localhost")
         port = creds.get("port", "")
