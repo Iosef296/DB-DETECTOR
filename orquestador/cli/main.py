@@ -10,12 +10,14 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 
-from core.orchestrator import Orchestrator
+from core.orchestrator import Gestor
 
+# Ruta al SQLite donde se persisten los proyectos registrados
 _DB_PATH = str(Path(__file__).parent.parent / "storage" / "projects.db")
 
 console = Console()
 
+# Colores para cada estado en la tabla de proyectos
 _STATUS_COLOR = {
     "RUNNING":  "green",
     "STOPPED":  "dim white",
@@ -23,6 +25,7 @@ _STATUS_COLOR = {
     "ERROR":    "red",
 }
 
+# Etiquetas cortas de BD para mostrar en la tabla
 _DB_ICON = {
     "postgresql": "[blue]PG[/blue]",
     "mysql":      "[cyan]MY[/cyan]",
@@ -32,8 +35,9 @@ _DB_ICON = {
 }
 
 
-def _get_orch() -> Orchestrator:
-    return Orchestrator(_DB_PATH)
+def _get_gestor() -> Gestor:
+    # Crear una nueva instancia del Gestor apuntando al SQLite del orquestador
+    return Gestor(_DB_PATH)
 
 
 @click.group()
@@ -46,7 +50,7 @@ def cli():
 @click.argument("ruta")
 def cmd_add(ruta):
     """Registra un proyecto nuevo."""
-    orch   = _get_orch()
+    orch   = _get_gestor()
     result = orch.add_project(ruta)
     if not result.get("ok"):
         console.print(f"[red]Error:[/red] {result.get('error')}")
@@ -63,7 +67,7 @@ def cmd_add(ruta):
 @cli.command("list")
 def cmd_list():
     """Lista todos los proyectos."""
-    orch     = _get_orch()
+    orch     = _get_gestor()
     projects = orch.list_projects()
     if not projects:
         console.print("[dim]No hay proyectos registrados. Usa 'add <ruta>' para agregar uno.[/dim]")
@@ -96,7 +100,7 @@ def cmd_list():
 @click.option("--all", "all_", is_flag=True, help="Levanta todos los proyectos en STOPPED")
 def cmd_up(nombre, all_):
     """Levanta un proyecto (o todos con --all)."""
-    orch = _get_orch()
+    orch = _get_gestor()
     if all_:
         result = orch.up_all()
         for n in result.get("started", []):
@@ -123,7 +127,7 @@ def cmd_up(nombre, all_):
 @click.option("--all", "all_", is_flag=True, help="Para todos los proyectos en RUNNING")
 def cmd_down(nombre, all_):
     """Para un proyecto (o todos con --all)."""
-    orch = _get_orch()
+    orch = _get_gestor()
     if all_:
         result = orch.down_all()
         for n in result.get("stopped", []):
@@ -146,7 +150,7 @@ def cmd_down(nombre, all_):
 @click.argument("nombre")
 def cmd_restart(nombre):
     """Reinicia un proyecto."""
-    orch   = _get_orch()
+    orch   = _get_gestor()
     result = orch.restart(nombre)
     if result.get("ok"):
         console.print(f"[green]'{nombre}' reiniciado en {result.get('app_url', '')}[/green]")
@@ -159,7 +163,7 @@ def cmd_restart(nombre):
 @click.argument("nombre")
 def cmd_status(nombre):
     """Muestra detalle completo de un proyecto."""
-    orch   = _get_orch()
+    orch   = _get_gestor()
     row    = orch.status(nombre)
     if not row:
         console.print(f"[red]Proyecto '{nombre}' no encontrado[/red]")
@@ -187,7 +191,7 @@ def cmd_status(nombre):
 @click.option("--follow", "-f", is_flag=True, help="Seguir en tiempo real (polling 2s)")
 def cmd_logs(nombre, lines, follow):
     """Muestra logs de un proyecto."""
-    orch = _get_orch()
+    orch = _get_gestor()
     if not follow:
         logs = orch.get_logs(nombre, lines)
         for line in logs:
@@ -216,7 +220,7 @@ def cmd_remove(nombre):
     if confirm.strip().lower() not in ("s", "si", "y", "yes"):
         console.print("[dim]Cancelado[/dim]")
         return
-    orch   = _get_orch()
+    orch   = _get_gestor()
     result = orch.remove_project(nombre)
     if result.get("ok"):
         console.print(f"[dim]'{nombre}' eliminado del orquestador[/dim]")

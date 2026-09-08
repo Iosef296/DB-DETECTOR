@@ -8,8 +8,13 @@ from typing import Optional
 
 _IS_WINDOWS = platform.system() == "Windows"
 
-# ─── Patrones de detección ────────────────────────────────────────────────────
+# ─── Patrones de detección ─────────────────────────────────────────────────────
+# El sistema de detección funciona por puntuación (scoring):
+# - Cada evidencia encontrada suma puntos según su peso (weight)
+# - Al final se ordenan los tipos de BD por puntuación total
+# - El tipo con más puntos es la BD primaria del proyecto
 
+# Regex para parsear URLs de conexión completas (ej. postgresql://user:pass@host:5432/db)
 DB_URL_PATTERNS = {
     "postgresql": [r"postgres(?:ql)?://([^:\s]+):([^@\s]+)@([^:/\s]+)(?::(\d+))?/(\S+)"],
     "mysql":      [
@@ -22,6 +27,7 @@ DB_URL_PATTERNS = {
     "redis":      [r"redis://(?:([^:\s]*):([^@\s]*)@)?([^:/\s]+)(?::(\d+))?(?:/(\d+))?"],
 }
 
+# Nombres de variables de entorno que indican cada tipo de BD (weight=2)
 ENV_KEY_PATTERNS = {
     "postgresql": ["DATABASE_URL", "POSTGRES_URL", "PG_URL", "POSTGRESQL_URL",
                    "DB_URL", "POSTGRES_URI", "PGDATABASE", "POSTGRES_DB"],
@@ -33,6 +39,7 @@ ENV_KEY_PATTERNS = {
     "redis":      ["REDIS_URL", "REDIS_URI", "REDIS_HOST", "CACHE_URL"],
 }
 
+# Nombres de drivers/librerías en package.json, requirements.txt, go.mod, etc. (weight=3)
 DRIVER_PATTERNS = {
     "postgresql": ["psycopg2", "psycopg", "pg", "postgres", "asyncpg",
                    "pg2", "node-postgres", "typeorm", "sequelize", "sqlalchemy",
@@ -272,12 +279,16 @@ def extract_spring_datasource(content: str) -> Optional[dict]:
 
 # ─── Detector principal ───────────────────────────────────────────────────────
 
+# ─── Detector principal ────────────────────────────────────────────────────────
+# Escanea un directorio de proyecto y detecta qué tipo de BD usa,
+# extrayendo credenciales cuando están disponibles en el código fuente.
+
 class DatabaseDetector:
     def __init__(self, project_path: str):
         self.root = os.path.abspath(project_path)
-        self.evidence = []   # lista de hallazgos
-        self.scores = {db: 0 for db in DB_URL_PATTERNS}
-        self.credentials = {}
+        self.evidence = []   # lista de hallazgos para mostrar en la UI
+        self.scores = {db: 0 for db in DB_URL_PATTERNS}  # puntuación acumulada por tipo de BD
+        self.credentials = {}  # credenciales extraídas, clave = tipo de BD
 
     def _add_evidence(self, db_type: str, source: str, detail: str, weight: int = 1):
         self.scores[db_type] = self.scores.get(db_type, 0) + weight
@@ -526,12 +537,16 @@ class DatabaseDetector:
         return None
 
     def detect(self) -> dict:
+        """
+        Ejecuta los tres escaneos en orden y consolida los resultados.
+        Orden de prioridad: archivos de entorno → dependencias → código fuente.
+        """
         if not os.path.isdir(self.root):
             return {"error": f"Carpeta no encontrada: {self.root}"}
 
-        self.scan_env_files()
-        self.scan_dependency_files()
-        self.scan_source_files()
+        self.scan_env_files()         # Lee .env, docker-compose, application.yml, etc.
+        self.scan_dependency_files()  # Lee package.json, requirements.txt, go.mod, etc.
+        self.scan_source_files()      # Lee código fuente buscando strings de conexión
 
         # Fallback SQLite: buscar archivos .db directamente si el score indica SQLite
         # pero no se extrajeron credenciales, o si no se detectó nada pero hay un .db
@@ -542,7 +557,7 @@ class DatabaseDetector:
                 self.scores["sqlite"] = max(self.scores.get("sqlite", 0), 3)
                 self._add_evidence("sqlite", os.path.basename(db_file), "Archivo de base de datos encontrado", weight=3)
 
-        # Ordenar por puntuación
+        # Ordenar tipos de BD por puntuación acumulada (mayor = más probable)
         ranked = sorted(
             [(db, score) for db, score in self.scores.items() if score > 0],
             key=lambda x: x[1], reverse=True
@@ -550,19 +565,19 @@ class DatabaseDetector:
 
         primary = ranked[0][0] if ranked else None
 
-        # Marcar si las credenciales son cloud (host no es localhost/127.0.0.1)
+        # Marcar credenciales cloud: host distinto de localhost indica BD remota
         local_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "", None}
         for creds in self.credentials.values():
             host = creds.get("host", "")
             creds["is_cloud"] = host not in local_hosts
 
-        # Solo conservar credenciales para tipos con evidencia real
+        # Descartar credenciales de tipos sin evidencia (pueden ser falsos positivos)
         detected_types = {db for db, _ in ranked}
         filtered_creds = {k: v for k, v in self.credentials.items() if k in detected_types}
 
-        # Eliminar credenciales duplicadas: si varios tipos comparten exactamente
-        # el mismo user+host+database, es señal de que provienen de keys genéricos
-        # (DB_HOST, DB_USER…). En ese caso, quedarse solo con el tipo primario.
+        # Deduplicar: si varios tipos tienen exactamente los mismos user+host+database,
+        # provienen de variables genéricas (DB_HOST, DB_USER...) y solo una BD puede ser la real.
+        # Quedarse solo con el tipo primario en ese caso.
         if primary and primary in filtered_creds:
             primary_creds = filtered_creds[primary]
             primary_sig = (primary_creds.get("user"), primary_creds.get("host"),

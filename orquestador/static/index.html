@@ -3,136 +3,349 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Orquestador</title>
+<title>Gestor · DB-Detector - RENACYT</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <style>
-  :root {
-    --bg:       #0d1117;
-    --surface:  #161b22;
-    --border:   #30363d;
-    --text:     #e6edf3;
-    --muted:    #8b949e;
-    --accent:   #2563eb;
-    --running:  #22c55e;
-    --stopped:  #6b7280;
-    --starting: #f59e0b;
-    --error:    #ef4444;
-    --sidebar:  240px;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; font-size: 14px; }
+/* ── Variables globales de diseño ─────────────────────────────────────────────
+   Todos los colores y tamaños del sistema de diseño están aquí centralizados.
+   Cambiar una variable afecta a todos los componentes que la usen. */
+:root {
+  --bg:          #0d1117;  /* fondo principal (GitHub dark) */
+  --surface:     #161b22;  /* superficie de tarjetas y sidebar */
+  --surface-2:   #1c2128;  /* superficie elevada (inputs, badges) */
+  --border:      #30363d;  /* bordes principales */
+  --border-sub:  #21262d;  /* bordes secundarios */
+  --text:        #e6edf3;  /* texto principal */
+  --text-sec:    #c9d1d9;  /* texto secundario */
+  --muted:       #7d8590;  /* texto apagado (metadata) */
+  --accent:      #2f81f7;  /* color de acento (azul GitHub) */
+  --accent-hi:   #388bfd;  /* acento hover */
+  --running:     #3fb950;  /* estado RUNNING (verde) */
+  --stopped:     #6e7681;  /* estado STOPPED (gris) */
+  --starting:    #e3b341;  /* estado STARTING (amarillo) */
+  --error:       #f85149;  /* estado ERROR (rojo) */
+  --sidebar:     248px;    /* ancho fijo del sidebar */
+  --radius:      6px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+}
+*  { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  display: flex; height: 100vh; overflow: hidden; font-size: 14px;
+}
 
-  /* ── Sidebar ── */
-  #sidebar {
-    width: var(--sidebar); min-width: var(--sidebar);
-    background: var(--surface); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; overflow: hidden;
-  }
-  #sidebar-header {
-    padding: 16px 14px 12px;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  #sidebar-header span { font-weight: 700; letter-spacing: .08em; font-size: 12px; color: var(--muted); }
-  #btn-add { background: var(--accent); border: none; color: #fff; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  #btn-add:hover { opacity: .85; }
-  #project-list { flex: 1; overflow-y: auto; }
-  .proj-item {
-    padding: 10px 14px; cursor: pointer; border-left: 3px solid transparent;
-    display: flex; align-items: center; gap: 8px;
-    transition: background .15s;
-  }
-  .proj-item:hover { background: rgba(255,255,255,.04); }
-  .proj-item.active { background: rgba(37,99,235,.15); border-left-color: var(--accent); }
-  .proj-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .proj-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .proj-db { font-size: 11px; color: var(--muted); }
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-  /* ── Main ── */
-  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+/* ── SIDEBAR ──────────────────────────────────────────────────────────────────
+   Panel izquierdo fijo con la lista de proyectos registrados.
+   Contiene: logo/marca, botones de acción (agregar/escanear), y la lista de proyectos. */
+#sidebar {
+  width: var(--sidebar); min-width: var(--sidebar);
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
 
-  /* ── Toolbar ── */
-  #toolbar {
-    padding: 10px 20px; border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 10px;
-  }
-  .btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
-  .btn:hover { background: rgba(255,255,255,.06); }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .btn.primary:hover { opacity: .85; }
-  .btn.danger { border-color: var(--error); color: var(--error); }
-  .btn.danger:hover { background: rgba(239,68,68,.1); }
-  .spacer { flex: 1; }
+#sidebar-brand {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+#sidebar-brand .brand-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+}
+#sidebar-brand .brand-icon {
+  width: 28px; height: 28px; border-radius: var(--radius);
+  background: var(--surface-2); border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--accent); flex-shrink: 0;
+}
+#sidebar-brand .brand-text { font-weight: 700; font-size: 13px; letter-spacing: .04em; }
+#sidebar-brand .brand-sub  { font-size: 10px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.sidebar-actions {
+  display: flex; gap: 6px;
+}
+.sidebar-actions .btn-sb {
+  flex: 1; padding: 6px 8px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-sec); cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  transition: background .15s, border-color .15s;
+}
+.sidebar-actions .btn-sb:hover { background: var(--bg); border-color: var(--accent); color: var(--text); }
+.sidebar-actions .btn-sb.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sidebar-actions .btn-sb.primary:hover { background: var(--accent-hi); }
 
-  /* ── Content ── */
-  #content { flex: 1; overflow-y: auto; padding: 24px; }
+#project-list { flex: 1; overflow-y: auto; padding: 6px 0; }
 
-  /* ── Table ── */
-  .data-table { width: 100%; border-collapse: collapse; }
-  .data-table th { text-align: left; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
-  .data-table td { padding: 10px 12px; border-bottom: 1px solid rgba(48,54,61,.5); font-size: 13px; }
-  .data-table tr:last-child td { border-bottom: none; }
-  .data-table tr:hover td { background: rgba(255,255,255,.03); }
+.proj-item {
+  padding: 9px 14px; cursor: pointer;
+  border-left: 3px solid transparent;
+  display: flex; align-items: center; gap: 9px;
+  transition: background .12s;
+}
+.proj-item:hover { background: rgba(255,255,255,.04); }
+.proj-item.active { background: rgba(47,129,247,.1); border-left-color: var(--accent); }
 
-  /* ── Status badges ── */
-  .badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-  .badge-RUNNING  { background: rgba(34,197,94,.15);  color: var(--running);  }
-  .badge-STOPPED  { background: rgba(107,114,128,.15); color: var(--stopped);  }
-  .badge-STARTING { background: rgba(245,158,11,.15); color: var(--starting); }
-  .badge-ERROR    { background: rgba(239,68,68,.15);   color: var(--error);    }
+.proj-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  transition: box-shadow .3s;
+}
+.proj-dot.running { box-shadow: 0 0 0 3px rgba(63,185,80,.2); animation: pulse 2s infinite; }
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 2px rgba(63,185,80,.2); }
+  50%      { box-shadow: 0 0 0 5px rgba(63,185,80,.05); }
+}
 
-  /* ── Tabs ── */
-  .tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
-  .tab { padding: 10px 20px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-size: 13px; }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.proj-info { flex: 1; min-width: 0; }
+.proj-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-meta { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+.proj-db-badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 10px;
+  background: rgba(255,255,255,.07); color: var(--muted);
+  text-transform: lowercase; letter-spacing: .03em;
+}
 
-  /* ── Cards ── */
-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-  .card-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-  .card-value { font-size: 16px; font-weight: 600; }
+/* ── MAIN ─────────────────────────────────────────────────────────────────────
+   Panel principal derecho: toolbar con botones de control + área de contenido.
+   Cambia de contenido según el proyecto seleccionado en el sidebar. */
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-  /* ── Query area ── */
-  #query-editor { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 12px; font-family: monospace; font-size: 13px; resize: vertical; min-height: 80px; }
-  #query-editor:focus { outline: none; border-color: var(--accent); }
-  .result-wrap { overflow-x: auto; margin-top: 16px; }
+#toolbar {
+  padding: 10px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.btn {
+  padding: 6px 13px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); cursor: pointer; font-size: 13px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background .12s, border-color .12s;
+  white-space: nowrap;
+}
+.btn:hover   { background: var(--surface-2); border-color: #484f57; }
+.btn:active  { opacity: .8; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+.btn.danger  { border-color: transparent; color: var(--error); }
+.btn.danger:hover { background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.3); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.spacer { flex: 1; }
+a.legacy-link { color: var(--muted); font-size: 12px; text-decoration: none; }
+a.legacy-link:hover { color: var(--text); }
 
-  /* ── Logs ── */
-  #log-area { background: #000; border-radius: 6px; padding: 14px; font-family: monospace; font-size: 12px; height: 420px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: #d4d4d4; }
+#content { flex: 1; overflow-y: auto; padding: 28px 28px 40px; }
 
-  /* ── Modal ── */
-  .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; align-items: center; justify-content: center; }
-  .modal-bg.open { display: flex; }
-  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; width: 480px; padding: 24px; }
-  .modal h3 { margin-bottom: 16px; }
-  .modal input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 9px 12px; font-size: 13px; }
-  .modal input:focus { outline: none; border-color: var(--accent); }
-  #preview-box { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-top: 12px; font-size: 12px; color: var(--muted); display: none; }
-  .modal-actions { margin-top: 18px; display: flex; gap: 10px; justify-content: flex-end; }
+/* ─────────────────────── LIST TABLE ─────────────────────── */
+.section-title {
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .08em; margin-bottom: 14px; font-weight: 600;
+}
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  text-align: left; padding: 8px 12px;
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .06em; border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.data-table td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border-sub);
+  font-size: 13px; color: var(--text-sec);
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover td { background: rgba(255,255,255,.025); color: var(--text); }
 
-  /* ── Toast ── */
-  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--error); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; z-index: 200; }
+/* ─────────────────────── BADGES ─────────────────────── */
+.badge {
+  padding: 2px 9px; border-radius: 20px;
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.badge-RUNNING  { background: rgba(63,185,80,.12);  color: var(--running); }
+.badge-STOPPED  { background: rgba(110,118,129,.12); color: var(--stopped); }
+.badge-STARTING { background: rgba(227,179,65,.12);  color: var(--starting); }
+.badge-ERROR    { background: rgba(248,81,73,.12);   color: var(--error); }
 
-  /* ── Pagination ── */
-  .pager { margin-top: 12px; display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+/* ─────────────────────── TABS ─────────────────────── */
+.tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 24px; gap: 2px; }
+.tab {
+  padding: 9px 18px; cursor: pointer; color: var(--muted);
+  border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500;
+  transition: color .12s; margin-bottom: -1px;
+}
+.tab:hover  { color: var(--text-sec); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
-  /* ── Util ── */
-  .gap { display: flex; gap: 8px; }
-  .section-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 14px; }
-  a.legacy-link { color: var(--muted); font-size: 12px; text-decoration: none; }
-  a.legacy-link:hover { color: var(--text); }
+/* ─────────────────────── INFO CARDS ─────────────────────── */
+.card-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+@media (max-width: 900px) { .card-grid { grid-template-columns: repeat(2, 1fr); } }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 14px 16px;
+  position: relative; overflow: hidden;
+  transition: border-color .15s;
+}
+.card:hover { border-color: #484f57; }
+.card-icon {
+  width: 30px; height: 30px; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; margin-bottom: 10px; opacity: .9;
+}
+.card-label { font-size: 11px; color: var(--muted); font-weight: 500; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .05em; }
+.card-value { font-size: 17px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.card-accent-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2px; opacity: .6;
+}
+
+/* ─────────────────────── CREDENTIALS ─────────────────────── */
+.creds-section { margin-bottom: 28px; }
+.creds-table {
+  width: 100%; border-collapse: collapse;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.creds-table th {
+  text-align: left; padding: 8px 16px;
+  font-size: 11px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .06em; border-bottom: 1px solid var(--border);
+  font-weight: 600; background: var(--surface-2);
+}
+.creds-table td {
+  padding: 10px 16px; border-bottom: 1px solid var(--border-sub); font-size: 13px;
+}
+.creds-table tr:last-child td { border-bottom: none; }
+.creds-table .cred-key   { color: var(--muted); width: 140px; font-weight: 500; }
+.creds-table .cred-val   { color: var(--text); font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+.creds-table .cred-val a { color: var(--accent); text-decoration: none; }
+.creds-table .cred-val a:hover { text-decoration: underline; }
+.creds-table .cred-copy {
+  width: 32px; text-align: right;
+}
+.copy-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  padding: 3px 6px; border-radius: 4px; font-size: 11px;
+  opacity: 0; transition: opacity .12s, color .12s;
+}
+.creds-table tr:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { color: var(--accent); }
+
+/* ─────────────────────── ACTION BAR ─────────────────────── */
+.action-bar { display: flex; gap: 8px; align-items: center; }
+
+/* ─────────────────────── QUERY AREA ─────────────────────── */
+.query-label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; font-weight: 500; }
+select.styled {
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text); padding: 7px 10px; border-radius: var(--radius);
+  font-size: 13px; outline: none;
+  transition: border-color .12s;
+}
+select.styled:focus { border-color: var(--accent); }
+#query-editor {
+  width: 100%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); padding: 12px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 13px; resize: vertical; min-height: 90px; outline: none;
+  transition: border-color .12s;
+}
+#query-editor:focus { border-color: var(--accent); }
+.result-wrap { overflow-x: auto; margin-top: 16px; }
+.pager {
+  margin-top: 12px; display: flex; gap: 8px;
+  align-items: center; font-size: 12px; color: var(--muted);
+}
+
+/* ─────────────────────── LOGS ─────────────────────── */
+#log-area {
+  background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 14px 16px; font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 12px; height: 420px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+  color: #c9d1d9; line-height: 1.5;
+}
+
+/* ─────────────────────── MODAL ─────────────────────── */
+.modal-bg {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.75); z-index: 100;
+  align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.modal-bg.open { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); width: 500px; padding: 24px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6);
+}
+.modal h3 { font-size: 16px; margin-bottom: 6px; }
+.modal .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+.modal input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); padding: 9px 12px; font-size: 13px;
+  outline: none; transition: border-color .12s;
+}
+.modal input:focus { border-color: var(--accent); }
+#preview-box {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; margin-top: 12px; font-size: 12px;
+  color: var(--muted); display: none; line-height: 1.7;
+}
+.modal-actions { margin-top: 20px; display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ─────────────────────── TOAST ─────────────────────── */
+#toast {
+  position: fixed; bottom: 24px; right: 24px;
+  background: #1c2128; border: 1px solid var(--border);
+  color: var(--text); padding: 10px 18px; border-radius: var(--radius-md);
+  font-size: 13px; display: none; z-index: 200;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  max-width: 400px;
+}
+#toast.error { border-color: rgba(248,81,73,.4); background: rgba(248,81,73,.1); color: var(--error); }
+#toast.ok    { border-color: rgba(63,185,80,.4);  background: rgba(63,185,80,.1);  color: var(--running); }
+
+/* ─────────────────────── EMPTY STATE ─────────────────────── */
+.empty-state {
+  text-align: center; padding: 80px 20px; color: var(--muted);
+}
+.empty-state i { font-size: 40px; margin-bottom: 16px; opacity: .3; display: block; }
+.empty-state p { font-size: 14px; }
+
+/* ─────────────────────── DETAIL HEADER ─────────────────────── */
+.detail-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 20px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--border);
+}
+.detail-title { font-weight: 700; font-size: 18px; flex: 1; }
+
+/* misc */
+.gap { display: flex; gap: 8px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
 
 <!-- Sidebar -->
 <aside id="sidebar">
-  <div id="sidebar-header">
-    <span>ORQUESTADOR</span>
-    <button id="btn-add" onclick="openModal()"><i class="fa fa-plus"></i> Agregar</button>
-    <button id="btn-add" onclick="openScanModal()" style="background:var(--surface);border:1px solid var(--border)"><i class="fa fa-folder-open"></i> Escanear Carpeta</button>
+  <div id="sidebar-brand">
+    <div class="brand-row">
+      <div class="brand-icon"><i class="fa fa-database"></i></div>
+      <div>
+        <div class="brand-text">DB-Detector</div>
+        <div class="brand-sub">Gestor</div>
+      </div>
+    </div>
+    <div class="sidebar-actions">
+      <button class="btn-sb primary" onclick="openModal()"><i class="fa fa-plus"></i> Agregar</button>
+      <button class="btn-sb"         onclick="openScanModal()"><i class="fa fa-folder-open"></i> Escanear</button>
+    </div>
   </div>
   <div id="project-list"></div>
 </aside>
@@ -141,9 +354,9 @@
 <div id="main">
   <div id="toolbar">
     <button class="btn primary" onclick="upAll()"><i class="fa fa-play"></i> Levantar todos</button>
-    <button class="btn" onclick="downAll()"><i class="fa fa-stop"></i> Bajar todos</button>
+    <button class="btn"         onclick="downAll()"><i class="fa fa-stop"></i> Bajar todos</button>
     <div class="spacer"></div>
-    <a href="/legacy" class="legacy-link">Interfaz clasica DB-Detector &rarr;</a>
+    <a href="/legacy" class="legacy-link">Interfaz clásica DB-Detector &rarr;</a>
   </div>
   <div id="content">
     <div id="panel-list"></div>
@@ -151,10 +364,11 @@
   </div>
 </div>
 
-<!-- Modal -->
+<!-- Modal: agregar proyecto -->
 <div class="modal-bg" id="modal">
   <div class="modal">
     <h3>Agregar Proyecto</h3>
+    <p class="modal-sub">Ingresa la ruta al proyecto para detectar su base de datos y framework.</p>
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <input id="modal-path" type="text" placeholder="/ruta/al/proyecto" style="flex:1">
       <button class="btn" onclick="detectProject()"><i class="fa fa-search"></i> Detectar</button>
@@ -162,16 +376,17 @@
     <div id="preview-box"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" id="btn-confirm" onclick="confirmAdd()" disabled>Confirmar y Agregar</button>
+      <button class="btn primary" id="btn-confirm" onclick="confirmAdd()" disabled>Confirmar</button>
     </div>
   </div>
 </div>
 
+<!-- Modal: escanear carpeta -->
 <div class="modal-bg" id="modal-scan">
   <div class="modal">
     <h3>Escanear Carpeta</h3>
-    <div style="margin-bottom:8px;font-size:12px;color:var(--muted)">Detecta y agrega automáticamente todos los proyectos dentro de una carpeta.</div>
-    <input id="scan-path" type="text" placeholder="/ruta/carpeta" style="width:100%;margin-bottom:12px">
+    <p class="modal-sub">Detecta y agrega automáticamente todos los proyectos dentro de una carpeta.</p>
+    <input id="scan-path" type="text" placeholder="/ruta/carpeta" style="margin-bottom:12px">
     <div id="scan-result"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeScanModal()">Cancelar</button>
@@ -183,6 +398,18 @@
 <div id="toast"></div>
 
 <script>
+// ── DB metadata ────────────────────────────────────────────────────────────
+const DB_META = {
+  postgresql: { color: '#4479ba', icon: 'fa-database', label: 'PostgreSQL' },
+  mysql:      { color: '#f5a623', icon: 'fa-database', label: 'MySQL'      },
+  mariadb:    { color: '#c0765a', icon: 'fa-database', label: 'MariaDB'    },
+  mongodb:    { color: '#47a248', icon: 'fa-leaf',     label: 'MongoDB'    },
+  redis:      { color: '#dc382d', icon: 'fa-bolt',     label: 'Redis'      },
+};
+function dbMeta(type) {
+  return DB_META[type?.toLowerCase()] || { color: 'var(--muted)', icon: 'fa-database', label: type || '—' };
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 const state = { projects: [], selected: null, tab: 'info', queryRows: [], queryPage: 0 };
 
@@ -198,13 +425,15 @@ async function fetchAPI(method, endpoint, body) {
   }
 }
 
-function toast(msg, dur=4000) {
+function toast(msg, type = 'error', dur = 4000) {
   const el = document.getElementById('toast');
-  el.textContent = msg; el.style.display = 'block';
+  el.className = type;
+  el.textContent = msg;
+  el.style.display = 'block';
   setTimeout(() => el.style.display = 'none', dur);
 }
 
-// ── Load projects ──────────────────────────────────────────────────────────
+// ── Load ───────────────────────────────────────────────────────────────────
 async function loadProjects() {
   const data = await fetchAPI('GET', '/api/projects');
   if (!Array.isArray(data)) return;
@@ -219,20 +448,29 @@ async function loadProjects() {
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 function statusColor(s) {
-  return { RUNNING:'#22c55e', STOPPED:'#6b7280', STARTING:'#f59e0b', ERROR:'#ef4444' }[s] || '#6b7280';
+  return { RUNNING: '#3fb950', STOPPED: '#6e7681', STARTING: '#e3b341', ERROR: '#f85149' }[s] || '#6e7681';
 }
 
 function renderSidebar() {
   const el = document.getElementById('project-list');
-  el.innerHTML = state.projects.map(p => `
-    <div class="proj-item ${p.name === state.selected ? 'active' : ''}" onclick="selectProject('${p.name}')">
-      <div class="proj-dot" style="background:${statusColor(p.status)}"></div>
-      <div>
-        <div class="proj-name">${p.name}</div>
-        <div class="proj-db">${p.db_type || '-'}</div>
-      </div>
-    </div>
-  `).join('');
+  if (!state.projects.length) {
+    el.innerHTML = '<p style="padding:20px 14px;font-size:12px;color:var(--muted)">Sin proyectos todavía.</p>';
+    return;
+  }
+  el.innerHTML = state.projects.map(p => {
+    const m = dbMeta(p.db_type);
+    const isRunning = p.status === 'RUNNING';
+    return `
+      <div class="proj-item ${p.name === state.selected ? 'active' : ''}" onclick="selectProject('${esc(p.name)}')">
+        <div class="proj-dot ${isRunning ? 'running' : ''}" style="background:${statusColor(p.status)}"></div>
+        <div class="proj-info">
+          <div class="proj-name">${esc(p.name)}</div>
+          <div class="proj-meta">
+            ${p.db_type ? `<span class="proj-db-badge" style="color:${m.color}">${m.label}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 // ── List panel ─────────────────────────────────────────────────────────────
@@ -241,7 +479,7 @@ function renderList() {
   if (state.selected) { el.style.display = 'none'; return; }
   el.style.display = '';
   if (!state.projects.length) {
-    el.innerHTML = '<p style="color:var(--muted);margin-top:40px;text-align:center">Sin proyectos. Usa + Agregar para registrar uno.</p>';
+    el.innerHTML = `<div class="empty-state"><i class="fa fa-database"></i><p>Sin proyectos. Usa <strong>Agregar</strong> para registrar uno.</p></div>`;
     return;
   }
   el.innerHTML = `
@@ -249,30 +487,31 @@ function renderList() {
     <table class="data-table">
       <thead><tr>
         <th>Nombre</th><th>BD</th><th>Framework</th>
-        <th>App URL</th><th>Puerto DB</th><th>Estado</th><th>Acciones</th>
+        <th>App URL</th><th>Puerto DB</th><th>Estado</th><th></th>
       </tr></thead>
       <tbody>
-      ${state.projects.map(p => `
-        <tr>
-          <td><a href="#" onclick="selectProject('${p.name}');return false" style="color:var(--accent)">${p.name}</a></td>
-          <td>${p.db_type || '-'}</td>
-          <td>${p.framework || '-'}</td>
-          <td>${p.app_port ? `<a href="http://localhost:${p.app_port}" target="_blank" style="color:var(--accent)">localhost:${p.app_port}</a>` : '-'}</td>
-          <td>${p.db_port || '-'}</td>
-          <td><span class="badge badge-${p.status}">${p.status}</span></td>
-          <td>
-            <div class="gap">
-              <button class="btn" title="Up" onclick="projectAction('${p.name}','up')"><i class="fa fa-play"></i></button>
-              <button class="btn" title="Down" onclick="projectAction('${p.name}','down')"><i class="fa fa-stop"></i></button>
-              <button class="btn" title="Restart" onclick="projectAction('${p.name}','restart')"><i class="fa fa-rotate-right"></i></button>
-              <button class="btn danger" title="Remove" onclick="removeProject('${p.name}')"><i class="fa fa-trash"></i></button>
-            </div>
-          </td>
-        </tr>
-      `).join('')}
+      ${state.projects.map(p => {
+        const m = dbMeta(p.db_type);
+        return `
+          <tr>
+            <td><a href="#" onclick="selectProject('${esc(p.name)}');return false" style="color:var(--accent);font-weight:500">${esc(p.name)}</a></td>
+            <td><span style="color:${m.color}">${m.label}</span></td>
+            <td style="color:var(--text-sec)">${p.framework || '—'}</td>
+            <td>${p.app_port ? `<a href="http://localhost:${p.app_port}" target="_blank" style="color:var(--accent)">localhost:${p.app_port}</a>` : '—'}</td>
+            <td style="font-variant-numeric:tabular-nums">${p.db_port || '—'}</td>
+            <td><span class="badge badge-${p.status}">${p.status}</span></td>
+            <td>
+              <div class="gap">
+                <button class="btn" title="Up"      onclick="projectAction('${esc(p.name)}','up')"><i class="fa fa-play"></i></button>
+                <button class="btn" title="Down"    onclick="projectAction('${esc(p.name)}','down')"><i class="fa fa-stop"></i></button>
+                <button class="btn" title="Restart" onclick="projectAction('${esc(p.name)}','restart')"><i class="fa fa-rotate-right"></i></button>
+                <button class="btn danger" title="Remove" onclick="removeProject('${esc(p.name)}')"><i class="fa fa-trash"></i></button>
+              </div>
+            </td>
+          </tr>`;
+      }).join('')}
       </tbody>
-    </table>
-  `;
+    </table>`;
 }
 
 // ── Detail panel ───────────────────────────────────────────────────────────
@@ -296,24 +535,22 @@ function backToList() {
 function renderDetail(p) {
   const el = document.getElementById('panel-detail');
   const tabs = ['info','queries','logs'];
-  const tabLabels = { info:'Informacion', queries:'Queries', logs:'Logs' };
-
+  const tabLabels = { info: 'Información', queries: 'Queries', logs: 'Logs' };
   let body = '';
-  if (state.tab === 'info') body = renderInfo(p);
+  if (state.tab === 'info')    body = renderInfo(p);
   else if (state.tab === 'queries') body = renderQueries(p);
-  else if (state.tab === 'logs') body = renderLogs(p);
+  else if (state.tab === 'logs')    body = renderLogs(p);
 
   el.innerHTML = `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-      <button class="btn" onclick="backToList()"><i class="fa fa-arrow-left"></i></button>
-      <span style="font-weight:700;font-size:16px">${p.name}</span>
+    <div class="detail-header">
+      <button class="btn" onclick="backToList()" style="padding:6px 10px"><i class="fa fa-arrow-left"></i></button>
+      <span class="detail-title">${esc(p.name)}</span>
       <span class="badge badge-${p.status}">${p.status}</span>
     </div>
     <div class="tabs">
-      ${tabs.map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}','${p.name}')">${tabLabels[t]}</div>`).join('')}
+      ${tabs.map(t => `<div class="tab ${state.tab===t?'active':''}" onclick="switchTab('${t}','${esc(p.name)}')">${tabLabels[t]}</div>`).join('')}
     </div>
-    ${body}
-  `;
+    ${body}`;
 
   if (state.tab === 'logs') {
     const la = document.getElementById('log-area');
@@ -325,77 +562,105 @@ function switchTab(tab, name) {
   state.tab = tab;
   const p = state.projects.find(x => x.name === name);
   if (p) renderDetail(p);
-  if (tab === 'logs') loadLogs(name);
+  if (tab === 'logs')    loadLogs(name);
   if (tab === 'queries') loadTables(name);
 }
 
+// ── Info tab ───────────────────────────────────────────────────────────────
 function renderInfo(p) {
   const creds = p.credentials || {};
+  const m = dbMeta(p.db_type);
+  const dbLabel = p.db_type || (p.framework === 'frontend' ? 'Frontend' : '—');
+
+  const cards = [
+    { label: 'Base de datos', value: m.label || dbLabel, icon: m.icon, color: m.color },
+    { label: 'Framework',     value: p.framework || '—', icon: 'fa-code',    color: '#7d8590' },
+    { label: 'Puerto App',    value: p.app_port  || '—', icon: 'fa-globe',   color: '#7d8590' },
+    { label: 'Puerto DB',     value: p.db_port   || '—', icon: 'fa-plug',    color: '#7d8590' },
+  ];
+
+  // build credential rows
+  const credRows = [];
+  if (p.app_port) credRows.push({ key: 'url app', val: `<a href="http://localhost:${p.app_port}" target="_blank">http://localhost:${p.app_port}</a>`, raw: `http://localhost:${p.app_port}` });
+  ['database','user','password'].forEach(k => {
+    if (creds[k] != null) credRows.push({ key: k, val: String(creds[k]), raw: String(creds[k]) });
+  });
+
   return `
     <div class="card-grid">
-      <div class="card"><div class="card-label">Base de datos</div><div class="card-value">${p.db_type || (p.framework==='frontend'?'Frontend':'Sin DB')}</div></div>
-      <div class="card"><div class="card-label">Framework</div><div class="card-value">${p.framework || '-'}</div></div>
-      <div class="card"><div class="card-label">Puerto App</div><div class="card-value">${p.app_port || '-'}</div></div>
-      <div class="card"><div class="card-label">Puerto DB</div><div class="card-value">${p.db_port || '-'}</div></div>
+      ${cards.map(c => `
+        <div class="card">
+          <div class="card-icon" style="background:${c.color}22;color:${c.color}"><i class="fa ${c.icon}"></i></div>
+          <div class="card-label">${c.label}</div>
+          <div class="card-value">${c.value}</div>
+          <div class="card-accent-bar" style="background:${c.color}"></div>
+        </div>`).join('')}
     </div>
-    ${Object.keys(creds).length ? `
-    <p class="section-title">Credenciales</p>
-    <table class="data-table" style="margin-bottom:24px">
-      <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
-      <tbody>
-        ${p.app_port ? `<tr><td>url app</td><td><a href="http://localhost:${p.app_port}" target="_blank" style="color:var(--accent);text-decoration:underline;">http://localhost:${p.app_port}</a></td></tr>` : ''}
-        ${['database','user','password'].filter(k=>creds[k]!=null).map(k=>`<tr><td>${k}</td><td>${creds[k]||'-'}</td></tr>`).join('')}
-      </tbody>
-    </table>` : ''}
-    <div class="gap">
-      <button class="btn primary" onclick="projectAction('${p.name}','up')"><i class="fa fa-play"></i> Up</button>
-      <button class="btn" onclick="projectAction('${p.name}','down')"><i class="fa fa-stop"></i> Down</button>
-      <button class="btn" onclick="projectAction('${p.name}','restart')"><i class="fa fa-rotate-right"></i> Restart</button>
-      <button class="btn danger" onclick="removeProject('${p.name}')"><i class="fa fa-trash"></i> Remove</button>
-    </div>
-  `;
+    ${credRows.length ? `
+    <div class="creds-section">
+      <p class="section-title">Credenciales</p>
+      <table class="creds-table">
+        <thead><tr><th>Campo</th><th>Valor</th><th></th></tr></thead>
+        <tbody>
+          ${credRows.map(r => `
+            <tr>
+              <td class="cred-key">${r.key}</td>
+              <td class="cred-val">${r.val}</td>
+              <td class="cred-copy"><button class="copy-btn" title="Copiar" onclick="copyText('${escAttr(r.raw)}')"><i class="fa fa-copy"></i></button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+    <div class="action-bar">
+      <button class="btn primary" onclick="projectAction('${esc(p.name)}','up')"><i class="fa fa-play"></i> Up</button>
+      <button class="btn"         onclick="projectAction('${esc(p.name)}','down')"><i class="fa fa-stop"></i> Down</button>
+      <button class="btn"         onclick="projectAction('${esc(p.name)}','restart')"><i class="fa fa-rotate-right"></i> Restart</button>
+      <div style="flex:1"></div>
+      <button class="btn danger"  onclick="removeProject('${esc(p.name)}')"><i class="fa fa-trash"></i> Remove</button>
+    </div>`;
 }
 
 // ── Queries tab ────────────────────────────────────────────────────────────
 let _currentTables = [];
+
 function renderQueries(p) {
   const PAGE_SIZE = 50;
   const rows = state.queryRows;
   const page = state.queryPage;
-  const slice = rows.slice(page*PAGE_SIZE, (page+1)*PAGE_SIZE);
+  const slice = rows.slice(page * PAGE_SIZE, (page+1) * PAGE_SIZE);
   const cols  = rows.length ? Object.keys(rows[0] || {}) : [];
+
   let resultHTML = '';
   if (rows.length) {
     resultHTML = `
       <div class="result-wrap">
         <table class="data-table">
-          <thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+          <thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead>
           <tbody>${slice.map(r=>`<tr>${cols.map(c=>`<td>${r[c]??''}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>
       <div class="pager">
-        Mostrando ${page*PAGE_SIZE+1}-${Math.min((page+1)*PAGE_SIZE,rows.length)} de ${rows.length}
+        ${page*PAGE_SIZE+1}–${Math.min((page+1)*PAGE_SIZE,rows.length)} de ${rows.length}
         <button class="btn" onclick="changePage(-1)" ${page===0?'disabled':''}>&#8592;</button>
-        <button class="btn" onclick="changePage(1)" ${(page+1)*PAGE_SIZE>=rows.length?'disabled':''}>&#8594;</button>
-        <button class="btn" onclick="exportQuery('${p.name}','json')"><i class="fa fa-download"></i> JSON</button>
-        <button class="btn" onclick="exportQuery('${p.name}','csv')"><i class="fa fa-download"></i> CSV</button>
-      </div>
-    `;
+        <button class="btn" onclick="changePage(1)"  ${(page+1)*PAGE_SIZE>=rows.length?'disabled':''}>&#8594;</button>
+        <button class="btn" onclick="exportQuery('${esc(p.name)}','json')"><i class="fa fa-download"></i> JSON</button>
+        <button class="btn" onclick="exportQuery('${esc(p.name)}','csv')"><i class="fa fa-download"></i> CSV</button>
+      </div>`;
   }
+
   return `
     <div style="margin-bottom:12px">
-      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">Tabla / Coleccion</label>
-      <select id="table-sel" onchange="fillQuery()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:6px;font-size:13px">
-        <option value="">-- seleccionar --</option>
-        ${_currentTables.map(t=>`<option value="${t.name}">${t.name}${t.size?' ('+t.size+')':''}</option>`).join('')}
+      <label class="query-label">Tabla / Colección</label>
+      <select id="table-sel" class="styled" onchange="fillQuery()">
+        <option value="">— seleccionar —</option>
+        ${_currentTables.map(t=>`<option value="${escAttr(t.name)}">${esc(t.name)}${t.size?' ('+t.size+')':''}</option>`).join('')}
       </select>
     </div>
     <textarea id="query-editor" placeholder="SELECT * FROM tabla LIMIT 100"></textarea>
     <div class="gap" style="margin-top:8px">
-      <button class="btn primary" onclick="runQuery('${p.name}')"><i class="fa fa-play"></i> Ejecutar</button>
+      <button class="btn primary" onclick="runQuery('${esc(p.name)}')"><i class="fa fa-play"></i> Ejecutar</button>
     </div>
-    ${resultHTML}
-  `;
+    ${resultHTML}`;
 }
 
 async function loadTables(name) {
@@ -408,9 +673,7 @@ async function loadTables(name) {
 function fillQuery() {
   const sel = document.getElementById('table-sel');
   const ed  = document.getElementById('query-editor');
-  if (sel && ed && sel.value) {
-    ed.value = `SELECT * FROM "${sel.value}" LIMIT 100`;
-  }
+  if (sel && ed && sel.value) ed.value = `SELECT * FROM "${sel.value}" LIMIT 100`;
 }
 
 function changePage(dir) {
@@ -425,15 +688,13 @@ async function runQuery(name) {
   const data = await fetchAPI('POST', `/api/projects/${name}/query`, { sql: q });
   if (data.error) { toast(data.error); return; }
   const cols = data.columns || [];
-  const rows_raw = data.rows || [];
-  state.queryRows = rows_raw.map(r => Object.fromEntries(cols.map((c,i)=>[c, r[i]])));
+  state.queryRows = (data.rows || []).map(r => Object.fromEntries(cols.map((c,i)=>[c, r[i]])));
   state.queryPage = 0;
   const p = state.projects.find(x => x.name === name);
   if (p) renderDetail(p);
 }
 
 async function exportQuery(name, fmt) {
-  const q = document.getElementById('query-editor')?.value?.trim();
   const sel = document.getElementById('table-sel')?.value;
   if (!sel) { toast('Selecciona una tabla primero'); return; }
   const resp = await fetch(`/api/projects/${name}/export`, {
@@ -449,46 +710,37 @@ async function exportQuery(name, fmt) {
 }
 
 // ── Logs tab ───────────────────────────────────────────────────────────────
-let _logInterval = null;
 function renderLogs(p) {
   return `
-    <div class="gap" style="margin-bottom:10px">
-      <button class="btn" onclick="loadLogs('${p.name}')"><i class="fa fa-rotate-right"></i> Actualizar</button>
+    <div class="gap" style="margin-bottom:12px">
+      <button class="btn" onclick="loadLogs('${esc(p.name)}')"><i class="fa fa-rotate-right"></i> Actualizar</button>
       <button class="btn" onclick="clearLogs()"><i class="fa fa-trash"></i> Limpiar</button>
       <button class="btn" onclick="copyLogs()"><i class="fa fa-copy"></i> Copiar todo</button>
     </div>
-    <div id="log-area"></div>
-  `;
+    <div id="log-area"></div>`;
 }
 
 async function loadLogs(name) {
   const data = await fetchAPI('GET', `/api/projects/${name}/logs?lines=200`);
   const el   = document.getElementById('log-area');
   if (!el) return;
-  const logs = data.logs || [];
-  el.textContent = logs.join('\n');
+  el.textContent = (data.logs || []).join('\n');
   el.scrollTop = el.scrollHeight;
 }
 
-function clearLogs() {
-  const el = document.getElementById('log-area');
-  if (el) el.textContent = '';
-}
-
-function copyLogs() {
-  const el = document.getElementById('log-area');
-  if (el) navigator.clipboard.writeText(el.textContent);
-}
+function clearLogs() { const el = document.getElementById('log-area'); if (el) el.textContent = ''; }
+function copyLogs()  { const el = document.getElementById('log-area'); if (el) navigator.clipboard.writeText(el.textContent); }
 
 // ── Project actions ────────────────────────────────────────────────────────
 async function projectAction(name, action) {
   const data = await fetchAPI('POST', `/api/projects/${name}/${action}`);
-  if (data.error) { toast(data.error); }
+  if (data.error) toast(data.error, 'error');
+  else if (action === 'up') toast('Servicio levantado', 'ok', 2500);
   await loadProjects();
 }
 
 async function removeProject(name) {
-  if (!confirm(`Eliminar '${name}' del orquestador? No se eliminan los archivos.`)) return;
+  if (!confirm(`Eliminar '${name}' del gestor?\n(Los archivos del proyecto no se borran)`)) return;
   await fetchAPI('DELETE', `/api/projects/${name}`);
   if (state.selected === name) backToList();
   await loadProjects();
@@ -496,7 +748,8 @@ async function removeProject(name) {
 
 async function upAll() {
   const data = await fetchAPI('POST', '/api/projects/up-all');
-  if (data.errors && data.errors.length) toast(`Errores: ${data.errors.map(e=>e.name).join(', ')}`);
+  if (data.errors?.length) toast(`Errores: ${data.errors.map(e=>e.name).join(', ')}`);
+  else toast('Todos los servicios levantados', 'ok', 2500);
   await loadProjects();
 }
 
@@ -505,7 +758,7 @@ async function downAll() {
   await loadProjects();
 }
 
-// ── Modal ──────────────────────────────────────────────────────────────────
+// ── Modal: agregar ─────────────────────────────────────────────────────────
 let _detectedProject = null;
 function openModal() {
   document.getElementById('modal').classList.add('open');
@@ -520,19 +773,21 @@ async function detectProject() {
   const path = document.getElementById('modal-path').value.trim();
   if (!path) return;
   const pb = document.getElementById('preview-box');
-  pb.style.display = 'block'; pb.textContent = 'Detectando...';
+  pb.style.display = 'block'; pb.textContent = 'Detectando…';
   document.getElementById('btn-confirm').disabled = true;
   const data = await fetchAPI('POST', '/api/detect', { path });
   if (data.error) { pb.textContent = `Error: ${data.error}`; return; }
   _detectedProject = { path, detection: data };
-  const db      = data.primary_db || 'desconocida';
-  const creds   = (data.credentials || {})[db] || {};
-  const appType = (data.app_start || {}).type || '-';
+  const db    = data.primary_db || 'desconocida';
+  const creds = (data.credentials || {})[db] || {};
+  const app   = (data.app_start || {}).type || '—';
+  const m     = dbMeta(db);
   pb.innerHTML = `
-    <strong>BD:</strong> ${db.toUpperCase()}<br>
-    <strong>Framework:</strong> ${appType}<br>
-    <strong>Host:</strong> ${creds.host || 'localhost'}  <strong>Puerto:</strong> ${creds.port || '-'}
-  `;
+    <span style="color:${m.color};font-weight:600">${m.label}</span> &nbsp;·&nbsp;
+    <span style="color:var(--text-sec)">${app}</span><br>
+    <span style="color:var(--muted)">Host:</span> ${creds.host || 'localhost'}
+    &nbsp;&nbsp;
+    <span style="color:var(--muted)">Puerto:</span> ${creds.port || '—'}`;
   document.getElementById('btn-confirm').disabled = false;
 }
 
@@ -545,7 +800,7 @@ async function confirmAdd() {
   await loadProjects();
 }
 
-// ── Scan Folder ────────────────────────────────────────────────────────────
+// ── Modal: escanear carpeta ────────────────────────────────────────────────
 function openScanModal() {
   document.getElementById('modal-scan').classList.add('open');
   document.getElementById('scan-path').value = '';
@@ -557,18 +812,28 @@ async function confirmScan() {
   const folder = document.getElementById('scan-path').value.trim();
   if (!folder) return;
   const res = document.getElementById('scan-result');
-  res.textContent = 'Escaneando...';
+  res.textContent = 'Escaneando…';
   const data = await fetchAPI('POST', '/api/projects/scan-folder', { folder });
   if (data.error) { res.textContent = `Error: ${data.error}`; return; }
   const added   = (data.added   || []).map(p => p.name).join(', ') || 'ninguno';
   const skipped = (data.skipped || []).length;
   const errors  = (data.errors  || []).length;
   res.innerHTML = `
-    <div style="color:#4ade80;margin-bottom:4px"><strong>Agregados (${data.added.length}):</strong> ${added}</div>
-    ${skipped ? `<div style="color:var(--muted)">Omitidos (ya existen o no son proyectos): ${skipped}</div>` : ''}
-    ${errors  ? `<div style="color:#f87171">Errores: ${(data.errors||[]).map(e=>e.name).join(', ')}</div>` : ''}
-  `;
+    <div style="color:var(--running);margin-bottom:4px;font-size:12px"><strong>Agregados (${(data.added||[]).length}):</strong> ${added}</div>
+    ${skipped ? `<div style="color:var(--muted);font-size:12px">Omitidos: ${skipped}</div>` : ''}
+    ${errors  ? `<div style="color:var(--error);font-size:12px">Errores: ${(data.errors||[]).map(e=>e.name).join(', ')}</div>` : ''}`;
   await loadProjects();
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s).replace(/'/g,"\\'");
+}
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast('Copiado', 'ok', 1500));
 }
 
 // ── Polling ────────────────────────────────────────────────────────────────
@@ -577,7 +842,6 @@ setInterval(async () => {
   if (state.selected && state.tab === 'logs') loadLogs(state.selected);
 }, 5000);
 
-// ── Init ───────────────────────────────────────────────────────────────────
 loadProjects();
 </script>
 </body>

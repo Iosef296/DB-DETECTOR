@@ -9,9 +9,9 @@ from pathlib import Path
 from core.detector import DatabaseDetector
 from core.connector import DBConnection
 from core.port_manager import PortManager
-from core.docker_manager import DockerManager
+from core.manager_factory import get_manager
 
-
+# Puerto estándar de cada motor de BD dentro del contenedor Docker
 _DB_CONTAINER_PORTS = {
     "postgresql": 5432,
     "mysql":      3306,
@@ -21,21 +21,33 @@ _DB_CONTAINER_PORTS = {
 }
 
 
-class Orchestrator:
+# ── Clase principal ────────────────────────────────────────────────────────────
+# Gestor es el cerebro del orquestador: registra proyectos en SQLite,
+# detecta su BD, asigna puertos, arranca/para Docker y el proceso de la app.
+
+class Gestor:
     def __init__(self, db_path: str):
+        # Ruta al archivo SQLite que persiste el estado de todos los proyectos
         self.db_path      = db_path
+        # PortManager garantiza que cada proyecto tenga puertos únicos
         self.port_manager = PortManager(db_path)
-        self.docker       = DockerManager()
-        # In-memory state per project
+        # get_manager() elige Docker si está disponible, sino PortableManager
+        self.docker       = get_manager()
+        # Conexiones DB activas en memoria (clave = nombre del proyecto)
         self._connections: dict[str, DBConnection]  = {}
+        # Procesos de la app corriendo (subprocess.Popen por proyecto)
         self._procs:       dict[str, subprocess.Popen] = {}
+        # Buffer de logs en memoria, máximo 500 líneas por proyecto
         self._logs:        dict[str, list]           = {}
+        # Lock para que varios hilos no corrompan los dicts anteriores
         self._lock = threading.Lock()
+        # Inicializar esquema SQLite si la tabla no existe todavía
         self._init_db()
 
     # ── SQLite setup ──────────────────────────────────────────────────────────
 
     def _init_db(self):
+        # Crear el directorio del archivo si no existe (ej. orquestador/storage/)
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         con = sqlite3.connect(self.db_path)
         con.execute("""
@@ -58,11 +70,13 @@ class Orchestrator:
         con.close()
 
     def _con(self) -> sqlite3.Connection:
+        # row_factory permite acceder a columnas por nombre (row["name"] en vez de row[0])
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
         return con
 
     def _row_to_dict(self, row) -> dict:
+        # Convierte una Row de SQLite a dict y deserializa los campos JSON
         if row is None:
             return {}
         d = dict(row)
@@ -80,10 +94,12 @@ class Orchestrator:
     # ── CRUD ──────────────────────────────────────────────────────────────────
 
     def add_project(self, path: str) -> dict:
+        # Resolver ~ y rutas relativas a ruta absoluta
         path = os.path.abspath(os.path.expanduser(path))
         if not os.path.isdir(path):
             return {"ok": False, "error": f"Carpeta no encontrada: {path}"}
 
+        # El nombre del proyecto es el nombre de la carpeta
         name = Path(path).name
 
         con = self._con()
@@ -92,20 +108,23 @@ class Orchestrator:
         if existing:
             return {"ok": False, "error": f"El proyecto '{name}' ya existe"}
 
+        # Correr el detector para encontrar qué BD usa el proyecto
         detector = DatabaseDetector(path)
         detection = detector.detect()
 
         db_type   = detection.get("primary_db")
         app_start = detection.get("app_start") or {}
         framework = app_start.get("type")
+        # Extraer credenciales específicas de la BD primaria detectada
         creds     = detection.get("credentials", {}).get(db_type) if db_type else {}
 
-        # Frontend-only project: has FE framework, no BE indicators → clear DB fields
+        # Proyecto solo-frontend (React, Vue, etc.): no necesita BD ni Docker
         if self._has_fe(path) and not self._has_be(path):
             db_type = None
             creds   = {}
             framework = framework or "frontend"
 
+        # Reservar puertos únicos para esta app y su BD
         db_port, app_port = self.port_manager.assign_ports(name)
 
         now = self._now()
@@ -136,17 +155,22 @@ class Orchestrator:
         }
 
     # ── Scan helpers ──────────────────────────────────────────────────────────
+    # Estas listas determinan si un proyecto tiene backend (necesita BD/Docker)
+    # o solo frontend (no necesita Docker).
 
     _BE_INDICATORS = [
+        # Archivos que solo existen en proyectos backend
         "pom.xml", "build.gradle", "build.gradle.kts", "gradlew", "mvnw",
         "manage.py", "requirements.txt", "Gemfile", "artisan", "go.mod", "main.go",
     ]
     _FE_INDICATORS = ["package.json"]
     _FE_FRAMEWORKS = {"react", "vue", "vite", "angular", "next", "nuxt", "svelte",
                       "solid", "preact", "astro", "remix", "gatsby"}
+    # Carpetas con nombres típicos de subdivisión BE/FE dentro de un mono-repo
     _SPLIT_NAMES   = {"backend", "frontend", "api", "client", "server", "web",
                       "app", "ui", "spa", "service", "services"}
 
+    # Dependencias npm que indican que el proyecto es un servidor Node, no solo FE
     _BE_SERVER_DEPS = {
         "express", "fastify", "koa", "hapi", "nestjs", "@nestjs/core",
         "pg", "mysql2", "mysql", "mongoose", "sequelize", "typeorm",
@@ -155,19 +179,19 @@ class Orchestrator:
     _BE_SERVER_DIRS = {"server", "backend", "api", "services", "service"}
 
     def _has_be(self, path: str) -> bool:
-        # Explicit BE files at root
+        # Comprobar archivos típicos de BE en la raíz
         if any(os.path.exists(os.path.join(path, f)) for f in self._BE_INDICATORS):
             return True
-        # docker-compose.yml at root = has DB services
+        # docker-compose en la raíz indica que hay servicios de BD
         for cf in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
             if os.path.exists(os.path.join(path, cf)):
                 return True
-        # server/ or backend/ subfolder with package.json
+        # Subcarpeta server/ o backend/ con su propio package.json → Node backend
         for d in self._BE_SERVER_DIRS:
             sub_pkg = os.path.join(path, d, "package.json")
             if os.path.exists(sub_pkg):
                 return True
-        # Root package.json has backend deps
+        # package.json en la raíz con dependencias de servidor Node
         pkg = os.path.join(path, "package.json")
         if os.path.exists(pkg):
             try:
@@ -181,6 +205,7 @@ class Orchestrator:
         return False
 
     def _has_fe(self, path: str) -> bool:
+        # Un proyecto tiene FE si package.json lista frameworks de frontend
         pkg = os.path.join(path, "package.json")
         if not os.path.exists(pkg):
             return False
@@ -190,7 +215,7 @@ class Orchestrator:
             deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
             return bool(self._FE_FRAMEWORKS & set(deps.keys()))
         except Exception:
-            return True  # has package.json, assume frontend
+            return True  # tiene package.json → asumir frontend
 
     def _add_one(self, path: str, added: list, skipped: list, errors: list):
         name = Path(path).name
@@ -203,7 +228,7 @@ class Orchestrator:
             errors.append({"name": name, "error": result.get("error")})
 
     def scan_folder(self, folder: str) -> dict:
-        """Scan a folder and auto-add all sub-projects, splitting BE/FE when present."""
+        """Escanea una carpeta y registra todos los sub-proyectos automáticamente."""
         folder = os.path.abspath(os.path.expanduser(folder))
         if not os.path.isdir(folder):
             return {"ok": False, "error": f"Carpeta no encontrada: {folder}"}
@@ -219,23 +244,24 @@ class Orchestrator:
                 continue
             path = entry.path
 
-            # Check for BE/FE sub-split inside this dir
+            # Buscar si hay subcarpetas con nombres BE/FE (mono-repo estilo)
             try:
                 sub_entries = [e for e in os.scandir(path) if e.is_dir()]
             except PermissionError:
                 sub_entries = []
 
+            # Subcarpetas con nombre típico Y que tengan código detectable
             split_subs = [e for e in sub_entries
                           if e.name.lower() in self._SPLIT_NAMES
                           and (self._has_be(e.path) or self._has_fe(e.path))]
 
             if split_subs:
-                # Has named BE/FE subdirs → add each separately
+                # Mono-repo con BE/FE separados → agregar cada uno por separado
                 for sub in split_subs:
                     self._add_one(sub.path, added, skipped, errors)
                 continue
 
-            # Has both BE and FE at root → split by type
+            # Proyecto normal con BE o FE en la raíz
             is_be = self._has_be(path)
             is_fe = self._has_fe(path)
 
@@ -251,9 +277,11 @@ class Orchestrator:
         if not row:
             return {"ok": False, "error": f"Proyecto '{name}' no encontrado"}
 
+        # Apagar el proyecto antes de borrarlo si está corriendo
         if row.get("status") in ("RUNNING", "STARTING"):
             self.down(name)
 
+        # Liberar los puertos para que otros proyectos los puedan reutilizar
         self.port_manager.release_ports(name)
         self.docker.remove_network(name)
 
@@ -262,6 +290,7 @@ class Orchestrator:
         con.commit()
         con.close()
 
+        # Limpiar estado en memoria
         with self._lock:
             self._connections.pop(name, None)
             self._procs.pop(name, None)
@@ -291,7 +320,7 @@ class Orchestrator:
         if not row:
             return {"ok": False, "error": f"Proyecto '{name}' no encontrado"}
 
-        # Kill any existing app process before starting fresh
+        # Matar proceso anterior si quedó colgado de un up() previo
         with self._lock:
             old_proc = self._procs.pop(name, None)
         if old_proc and old_proc.poll() is None:
@@ -310,7 +339,7 @@ class Orchestrator:
         creds   = row.get("credentials") or {}
         db_port = row.get("db_port")
 
-        # Frontend-only: skip Docker entirely
+        # Proyectos frontend-only no necesitan Docker ni BD
         is_frontend_only = not db_type
 
         if not is_frontend_only:
@@ -319,6 +348,7 @@ class Orchestrator:
         detection = row.get("detection") or {}
         compose_file = detection.get("compose_file")
 
+        # Si no hay compose.yml existente, generarlo desde la plantilla para la BD detectada
         if not is_frontend_only:
             if not compose_file or not os.path.isfile(compose_file):
                 if db_type:
@@ -326,13 +356,14 @@ class Orchestrator:
                         path, db_type, creds, {"db_port": db_port}
                     )
 
+        # Levantar Docker Compose (o PortableManager si no hay Docker)
         if not is_frontend_only and compose_file and os.path.isfile(compose_file):
             result = self.docker.up(path, f"orq_{name}_net", {"db_port": db_port})
             if not result.get("ok"):
                 self._set_status(name, "ERROR")
                 return result
 
-            # Extract real credentials from compose after possible port remapping
+            # Leer credenciales reales del compose (puede haber remapeo de puertos por conflicto)
             compose_info = self.docker.get_compose_db_info(compose_file, db_type or "")
             running_ports = self.docker.get_running_ports(compose_file)
             if running_ports:
@@ -341,6 +372,7 @@ class Orchestrator:
                     compose_info["host_port"] = running_ports[container_port]
 
             if compose_info.get("host_port"):
+                # Actualizar credenciales con el puerto real que Docker asignó
                 real_db_port = compose_info["host_port"]
                 creds = dict(creds)
                 creds["port"] = real_db_port
@@ -357,8 +389,20 @@ class Orchestrator:
                 )
                 con.commit()
                 con.close()
+            elif db_port:
+                # Modo nativo/portable: no hay host_port en compose_info.
+                # Usar el db_port asignado originalmente para mantener consistencia.
+                creds = dict(creds)
+                creds["port"] = db_port
+                con = self._con()
+                con.execute(
+                    "UPDATE projects SET credentials = ?, db_port = ?, updated_at = ? WHERE name = ?",
+                    (json.dumps(creds), db_port, self._now(), name)
+                )
+                con.commit()
+                con.close()
 
-            # Wait for DB port
+            # Esperar a que el puerto de la BD responda antes de arrancar la app
             host = creds.get("host", "localhost")
             port = creds.get("port")
             if port and host in ("localhost", "127.0.0.1"):
@@ -367,7 +411,7 @@ class Orchestrator:
                     self._set_status(name, "ERROR")
                     return {"ok": False, "error": f"Contenedor arrancó pero puerto {port} no responde"}
 
-        # Start application process
+        # Arrancar el proceso de la aplicación (npm run dev, python manage.py, etc.)
         app_start = detection.get("app_start") or {}
         app_port  = row.get("app_port")
         app_proc  = self._start_app(name, app_start, creds, db_type, app_port)
@@ -387,15 +431,17 @@ class Orchestrator:
     def _start_app(self, name: str, app_start: dict,
                    creds: dict, db_type: str,
                    app_port: int = None) -> "subprocess.Popen | None":
+        # Si el detector no encontró cómo arrancar la app, no hacemos nada
         if not app_start or not app_start.get("cmd"):
             return None
 
         cmd = app_start["cmd"]
         cwd = app_start.get("cwd", ".")
+        # Heredar el entorno del sistema y añadir variables de BD
         env = os.environ.copy()
         if app_port:
             env["PORT"] = str(app_port)
-            env["SERVER_PORT"] = str(app_port)  # Spring Boot
+            env["SERVER_PORT"] = str(app_port)  # Spring Boot usa SERVER_PORT
 
         host = creds.get("host", "localhost")
         if host == "127.0.0.1":
@@ -406,7 +452,11 @@ class Orchestrator:
         pwd  = creds.get("password", "")
         app_type = app_start.get("type", "")
 
+        # Inyectar variables de entorno según el framework detectado.
+        # Cada framework tiene sus propios nombres de variables de BD.
+
         if app_type == "springboot":
+            # Spring Boot lee la BD de SPRING_DATASOURCE_URL
             if db_type == "postgresql" and port:
                 env["SPRING_DATASOURCE_URL"]      = f"jdbc:postgresql://{host}:{port}/{db}"
                 env["SPRING_DATASOURCE_USERNAME"] = user
@@ -429,6 +479,7 @@ class Orchestrator:
                     env["SPRING_DATA_REDIS_PASSWORD"] = pwd
 
         elif app_type == "nodejs":
+            # Node.js usa DATABASE_URL en formato URL de conexión
             if db_type == "postgresql" and port:
                 env["DATABASE_URL"] = f"postgresql://{user}:{pwd}@{host}:{port}/{db}"
             elif db_type in ("mysql", "mariadb") and port:
@@ -438,6 +489,7 @@ class Orchestrator:
                     _mongo_uri = f"mongodb://{user}:{pwd}@{host}:{port}/{db}?authSource=admin"
                 else:
                     _mongo_uri = f"mongodb://{host}:{port}/{db}"
+                # Distintas librerías usan distintas variables → las poblamos todas
                 for _k in ("MONGODB_URI", "MONGO_URI", "MONGO_URL", "DATABASE_URL",
                            "DB_URI", "MONGO_CONNECTION_STRING", "MONGODB_URL"):
                     env[_k] = _mongo_uri
@@ -445,6 +497,7 @@ class Orchestrator:
                 env["REDIS_URL"] = f"redis://:{pwd}@{host}:{port}" if pwd else f"redis://{host}:{port}"
 
         elif app_type in ("django", "python"):
+            # Django/Flask pueden usar DATABASE_URL o variables individuales
             if db_type == "postgresql" and port:
                 env["DATABASE_URL"] = f"postgresql://{user}:{pwd}@{host}:{port}/{db}"
             elif db_type in ("mysql", "mariadb") and port:
@@ -453,6 +506,7 @@ class Orchestrator:
                 env["MONGODB_URI"] = f"mongodb://{host}:{port}/{db}"
             elif db_type == "redis" and port:
                 env["REDIS_URL"] = f"redis://:{pwd}@{host}:{port}" if pwd else f"redis://{host}:{port}"
+            # Variables individuales DB_HOST / DB_PORT / etc. para compatibilidad
             if db_type in ("postgresql", "mysql", "mariadb") and port:
                 env["DB_HOST"] = host
                 env["DB_PORT"] = str(port)
@@ -467,6 +521,7 @@ class Orchestrator:
                 env["DATABASE_URL"] = f"mysql2://{user}:{pwd}@{host}:{port}/{db}"
 
         elif app_type == "laravel":
+            # Laravel usa variables DB_* en lugar de DATABASE_URL
             if db_type == "postgresql":
                 env.update({"DB_CONNECTION": "pgsql", "DB_HOST": host, "DB_PORT": str(port),
                             "DB_DATABASE": db, "DB_USERNAME": user, "DB_PASSWORD": pwd})
@@ -478,6 +533,7 @@ class Orchestrator:
             if db_type == "postgresql" and port:
                 env["DATABASE_URL"] = f"postgresql://{user}:{pwd}@{host}:{port}/{db}"
             elif db_type in ("mysql", "mariadb") and port:
+                # Go usa el formato DSN de MySQL: user:pass@tcp(host:port)/db
                 env["DATABASE_URL"] = f"{user}:{pwd}@tcp({host}:{port})/{db}"
             elif db_type == "mongodb" and port:
                 env["MONGODB_URI"] = f"mongodb://{host}:{port}/{db}"
@@ -485,12 +541,14 @@ class Orchestrator:
                 env["REDIS_ADDR"] = f"{host}:{port}"
 
         try:
+            # Lanzar el proceso con stdout capturado para poder leer logs
             proc = subprocess.Popen(
                 cmd, shell=True, cwd=cwd, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 encoding="utf-8", errors="replace", bufsize=1,
             )
 
+            # Hilo daemon que lee stdout/stderr línea a línea y los guarda en _logs
             def _reader():
                 for line in proc.stdout:
                     self.append_log(name, line.rstrip())
@@ -507,7 +565,7 @@ class Orchestrator:
         if not row:
             return {"ok": False, "error": f"Proyecto '{name}' no encontrado"}
 
-        # Stop app process
+        # Parar proceso de la app (SIGTERM → esperar 5s → SIGKILL si sigue vivo)
         with self._lock:
             proc = self._procs.pop(name, None)
         if proc and proc.poll() is None:
@@ -520,10 +578,10 @@ class Orchestrator:
                 except Exception:
                     pass
 
-        # Stop Docker
+        # Bajar contenedores Docker (o detener proceso nativo)
         self.docker.down(row["path"])
 
-        # Disconnect DB
+        # Cerrar conexión activa a la BD si existe
         with self._lock:
             conn = self._connections.pop(name, None)
         if conn:
@@ -536,6 +594,7 @@ class Orchestrator:
         return {"ok": True}
 
     def restart(self, name: str) -> dict:
+        # Parar limpio y luego volver a arrancar
         self.down(name)
         return self.up(name)
 
@@ -543,6 +602,7 @@ class Orchestrator:
         row = self._get_row(name)
         if not row:
             return {}
+        # Enriquecer con estado real de los contenedores Docker
         docker_status = self.docker.status(row.get("path", ""))
         row["docker"] = docker_status
         return row
@@ -554,6 +614,7 @@ class Orchestrator:
         return [self._row_to_dict(r) for r in rows]
 
     def up_all(self) -> dict:
+        # Arrancar solo los proyectos en estado STOPPED (ignorar RUNNING/ERROR)
         projects = self.list_projects()
         started, errors = [], []
         for p in projects:
@@ -566,6 +627,7 @@ class Orchestrator:
         return {"started": started, "errors": errors}
 
     def down_all(self) -> dict:
+        # Parar solo los proyectos en estado RUNNING o STARTING
         projects = self.list_projects()
         stopped, errors = [], []
         for p in projects:
@@ -578,6 +640,7 @@ class Orchestrator:
         return {"stopped": stopped, "errors": errors}
 
     def get_connection(self, name: str) -> "DBConnection | None":
+        # Devolver conexión cacheada si ya existe (evitar reconectar en cada query)
         with self._lock:
             existing = self._connections.get(name)
         if existing:
@@ -590,7 +653,7 @@ class Orchestrator:
         if not creds:
             return None
 
-        # Build raw_url for MongoDB so connector uses auth + authSource=admin
+        # MongoDB necesita raw_url con authSource=admin para autenticarse correctamente
         creds = dict(creds)
         if (creds.get("type") or row.get("db_type") or "").lower() == "mongodb":
             host = creds.get("host", "localhost")
@@ -606,12 +669,14 @@ class Orchestrator:
         conn = DBConnection(creds)
         result = conn.connect()
         if result.get("ok"):
+            # Solo cachear si la conexión fue exitosa
             with self._lock:
                 self._connections[name] = conn
             return conn
         return None
 
     def append_log(self, name: str, line: str):
+        # Buffer circular: se descarta la línea más antigua cuando llega a 500
         with self._lock:
             buf = self._logs.setdefault(name, [])
             buf.append(line)
@@ -619,6 +684,7 @@ class Orchestrator:
                 buf.pop(0)
 
     def get_logs(self, name: str, lines: int = 200) -> list:
+        # Devolver las últimas N líneas del buffer
         with self._lock:
             buf = self._logs.get(name, [])
             return list(buf[-lines:])

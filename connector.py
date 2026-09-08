@@ -2,7 +2,8 @@ import json
 import importlib
 from typing import Any, Optional
 
-# ─── Hints de instalación ─────────────────────────────────────────────────────
+# ── Hints de instalación ───────────────────────────────────────────────────────
+# Si el driver Python no está instalado, le decimos al usuario qué hacer
 
 _DRIVER_HINTS = {
     "postgresql": {"pip": "psycopg2-binary"},
@@ -11,6 +12,7 @@ _DRIVER_HINTS = {
     "redis":      {"pip": "redis"},
 }
 
+# Si el servidor de BD no está levantado, ofrecemos comandos para instalarlo/arrancarlo
 _SERVER_HINTS = {
     "postgresql": {
         "docker": "docker run -d --name postgres -e POSTGRES_PASSWORD=pass -p 5432:5432 postgres:16",
@@ -35,23 +37,27 @@ _SERVER_HINTS = {
 }
 
 def _is_server_down(err: str) -> bool:
+    """Detecta si el error es de conexión rechazada (servidor apagado, no credenciales malas)."""
     keywords = ["connection refused", "connect etimedout", "no route to host",
                  "errno 111", "errno 61", "timeout", "timed out", "unreachable",
                  "serverselectiontimeouterror", "could not connect"]
     low = err.lower()
     return any(k in low for k in keywords)
 
-# ─── Conexión dinámica ────────────────────────────────────────────────────────
+# ── Conexión dinámica ─────────────────────────────────────────────────────────
 
 class DBConnection:
     def __init__(self, credentials: dict):
+        # credentials: dict con "type", "host", "port", "user", "password", "database"
         self.creds = credentials
         self.db_type = credentials.get("type")
-        self._conn = None
-        self._cursor = None
+        self._conn   = None    # conexión activa al driver
+        self._cursor = None    # cursor SQL (no aplica para MongoDB/Redis)
 
     def connect(self) -> dict:
+        """Intenta conectar a la BD según su tipo. Enriquece el error con hints si falla."""
         try:
+            # Despacho por tipo de BD
             if self.db_type == "postgresql":
                 result = self._connect_postgres()
             elif self.db_type == "mysql":
@@ -65,7 +71,7 @@ class DBConnection:
             else:
                 return {"ok": False, "error": f"Tipo de BD no soportado: {self.db_type}"}
 
-            # Si falló, enriquecer con hint de instalación
+            # Si falló, adjuntar sugerencia de instalación para guiar al usuario
             if not result.get("ok"):
                 self._attach_install_hint(result)
             return result
@@ -75,14 +81,15 @@ class DBConnection:
             return result
 
     def _attach_install_hint(self, result: dict):
+        """Añade install_hint al resultado según el tipo de error."""
         err = result.get("error", "")
         db  = self.db_type
-        # Driver Python faltante
+        # Error de driver Python faltante (ModuleNotFoundError)
         if "no instalado" in err or "No module named" in err:
             hint = _DRIVER_HINTS.get(db, {}).copy()
             hint["type"] = "driver"
             result["install_hint"] = hint
-        # Servidor no arrancado / no accesible
+        # Error de servidor no accesible (connection refused, timeout...)
         elif _is_server_down(err):
             hint = _SERVER_HINTS.get(db, {}).copy()
             hint["type"] = "server"
@@ -90,6 +97,7 @@ class DBConnection:
             result["install_hint"] = hint
 
     def _connect_postgres(self):
+        # Importar psycopg2 dinámicamente para no requerir la instalación si no se usa
         try:
             psycopg2 = importlib.import_module("psycopg2")
         except ImportError:
@@ -103,7 +111,7 @@ class DBConnection:
             database=c.get("database", ""),
             connect_timeout=5,
         )
-        self._conn.autocommit = True
+        self._conn.autocommit = True  # sin autocommit cada query necesitaría commit()
         self._cursor = self._conn.cursor()
         return {"ok": True}
 
@@ -113,7 +121,7 @@ class DBConnection:
         except ImportError:
             return {"ok": False, "error": "pymysql no instalado. Ejecuta: pip install pymysql"}
         c = self.creds
-        db = c.get("database") or None
+        db = c.get("database") or None  # None en vez de "" para que MySQL conecte sin BD
         self._conn = pymysql.connect(
             host=c.get("host", "localhost"),
             port=int(c.get("port", 3306)),
@@ -134,14 +142,16 @@ class DBConnection:
         c = self.creds
         host = c.get("host", "localhost")
         port = int(c.get("port", 27017))
+        # raw_url incluye credenciales y authSource=admin cuando hay auth
         url = c.get("raw_url") or f"mongodb://{host}:{port}/"
         client = pymongo.MongoClient(url, serverSelectionTimeoutMS=5000)
-        client.server_info()  # fuerza la conexión
+        client.server_info()  # forzar la conexión real (lazy por defecto en pymongo)
         self._conn = client
         return {"ok": True}
 
     def _connect_sqlite(self):
         import sqlite3
+        # SQLite no necesita servidor → el archivo es la BD
         path = self.creds.get("path", ":memory:")
         self._conn = sqlite3.connect(path)
         self._cursor = self._conn.cursor()
@@ -160,17 +170,17 @@ class DBConnection:
             password=c.get("password") or None,
             db=int(c.get("database") or 0),
             socket_connect_timeout=5,
-            decode_responses=True,
+            decode_responses=True,  # devolver strings en vez de bytes
         )
-        self._conn.ping()
+        self._conn.ping()  # probar la conexión
         return {"ok": True}
 
     def _mongo_db(self):
-        """Devuelve el objeto db de Mongo, con fallback a la primera BD disponible."""
+        """Devuelve el objeto db de Mongo, con fallback a la primera BD no-sistema."""
         db_name = self.creds.get("database", "").strip()
         if db_name:
             return self._conn[db_name]
-        # Intentar con la DB embebida en la URL
+        # Intentar obtener la BD por defecto embebida en la URL
         try:
             return self._conn.get_default_database()
         except Exception:
@@ -180,7 +190,6 @@ class DBConnection:
         for name in self._conn.list_database_names():
             if name not in system_dbs:
                 return self._conn[name]
-        # Si solo hay DBs de sistema, devolver admin
         return self._conn["admin"]
 
     def disconnect(self):
@@ -190,11 +199,13 @@ class DBConnection:
         except Exception:
             pass
 
-    # ─── Operaciones ─────────────────────────────────────────────────────────
+    # ── Operaciones ───────────────────────────────────────────────────────────
 
     def list_tables(self) -> dict:
+        """Lista tablas/colecciones de la BD activa con su tamaño."""
         try:
             if self.db_type == "postgresql":
+                # pg_total_relation_size incluye índices y TOAST (tamaño real en disco)
                 self._cursor.execute("""
                     SELECT tablename AS table_name,
                            pg_size_pretty(COALESCE(
@@ -208,6 +219,7 @@ class DBConnection:
                 return {"ok": True, "tables": [{"name": r[0], "size": r[1]} for r in rows]}
 
             elif self.db_type == "mysql":
+                # data_length + index_length = tamaño total de la tabla
                 self._cursor.execute("""
                     SELECT table_name,
                            ROUND((data_length + index_length) / 1024) AS size_kb
@@ -223,6 +235,7 @@ class DBConnection:
                 collections = db.list_collection_names()
                 result = []
                 for col in collections:
+                    # estimated_document_count es O(1) → no escanea la colección
                     count = db[col].estimated_document_count()
                     result.append({"name": col, "size": f"{count} docs"})
                 return {"ok": True, "tables": result}
@@ -233,6 +246,7 @@ class DBConnection:
                 return {"ok": True, "tables": [{"name": r[0], "size": ""} for r in rows]}
 
             elif self.db_type == "redis":
+                # Redis no tiene tablas; usamos el número de claves como "tamaño"
                 keys_count = self._conn.dbsize()
                 db_num = int(self.creds.get("database", 0))
                 return {"ok": True, "tables": [{"name": f"DB {db_num}", "size": f"{keys_count} keys"}]}
@@ -242,36 +256,39 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def execute_query(self, query: str, include_id: bool = False) -> dict:
+        """Ejecuta una query y devuelve {columns, rows, rowcount}."""
         try:
             if self.db_type in ("postgresql", "mysql", "sqlite"):
                 self._cursor.execute(query)
                 q_upper = query.strip().upper()
                 if q_upper.startswith(("SELECT", "SHOW", "DESCRIBE", "EXPLAIN", "PRAGMA")):
+                    # Query de lectura → devolver filas y columnas
                     rows = self._cursor.fetchall()
                     cols = [d[0] for d in (self._cursor.description or [])]
                     return {"ok": True, "columns": cols, "rows": [list(r) for r in rows],
                             "rowcount": len(rows)}
                 else:
+                    # Query de escritura → devolver número de filas afectadas
                     return {"ok": True, "columns": [], "rows": [],
                             "rowcount": self._cursor.rowcount,
                             "message": f"{self._cursor.rowcount} filas afectadas"}
 
             elif self.db_type == "mongodb":
+                # Para MongoDB el "query" es un JSON como {"find": "users", "filter": {}}
                 try:
                     cmd = json.loads(query)
                 except json.JSONDecodeError:
                     return {"ok": False, "error": "Para MongoDB usa JSON. Ej: {\"find\": \"users\", \"filter\": {}}"}
                 db = self._mongo_db()
-                # Si include_id, usar find directamente para controlar proyección
                 if include_id and "find" in cmd:
+                    # find directo para controlar proyección de _id
                     col_name = cmd["find"]
                     filt     = cmd.get("filter", {})
                     limit    = cmd.get("limit", 1000)
                     docs     = list(db[col_name].find(filt).limit(limit))
-                    # Serializar _id como string
                     for d in docs:
                         if "_id" in d:
-                            d["_id"] = str(d["_id"])
+                            d["_id"] = str(d["_id"])  # ObjectId no es serializable a JSON
                 else:
                     result   = db.command(cmd)
                     docs     = result.get("cursor", {}).get("firstBatch", [result])
@@ -285,6 +302,7 @@ class DBConnection:
                 return {"ok": True, "columns": cols, "rows": rows, "rowcount": len(rows)}
 
             elif self.db_type == "redis":
+                # Para Redis el "query" es un comando de texto como "GET mykey" o "KEYS *"
                 parts = query.strip().split()
                 result = self._conn.execute_command(*parts)
                 if result is None:
@@ -299,6 +317,7 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def export_table(self, table_name: str, fmt: str = "json") -> dict:
+        """Exporta hasta 10000 filas de una tabla a JSON o CSV."""
         try:
             if self.db_type in ("postgresql", "mysql", "sqlite"):
                 self._cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 10000')
@@ -318,6 +337,7 @@ class DBConnection:
 
             elif self.db_type == "mongodb":
                 db = self._mongo_db()
+                # {"_id": 0} excluye el campo _id del resultado
                 docs = list(db[table_name].find({}, {"_id": 0}).limit(10000))
                 if fmt == "json":
                     return {"ok": True, "data": json.dumps(docs, indent=2, default=str),
@@ -333,6 +353,7 @@ class DBConnection:
                     return {"ok": True, "data": buf.getvalue(), "filename": f"{table_name}.csv"}
 
             elif self.db_type == "redis":
+                # Exportar las primeras 1000 claves con su tipo y valor
                 keys = self._conn.keys("*")[:1000]
                 data = {}
                 for k in keys:
@@ -355,8 +376,10 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def get_table_schema(self, table_name: str) -> dict:
+        """Obtiene la definición de columnas de una tabla (nombre, tipo, PK, nullable, default)."""
         try:
             if self.db_type == "postgresql":
+                # JOIN a information_schema para detectar PK, UNIQUE, FK por columna
                 self._cursor.execute("""
                     SELECT
                         c.column_name,
@@ -407,12 +430,14 @@ class DBConnection:
                     ORDER BY ORDINAL_POSITION
                 """, (table_name,))
                 rows = self._cursor.fetchall()
+                # MySQL usa PRI/UNI/MUL en vez de PRIMARY KEY/UNIQUE/FOREIGN KEY
                 key_map = {"PRI": "PK", "UNI": "UNIQUE", "MUL": "FK"}
                 cols = [{"name": r[0], "type": r[1], "nullable": r[2] == "YES",
                          "default": r[3], "key": key_map.get(r[4])} for r in rows]
                 return {"ok": True, "columns": cols}
 
             elif self.db_type == "sqlite":
+                # PRAGMA table_info devuelve (cid, name, type, notnull, dflt_value, pk)
                 self._cursor.execute(f'PRAGMA table_info("{table_name}")')
                 rows = self._cursor.fetchall()
                 cols = [{"name": r[1], "type": r[2] or "TEXT", "nullable": not r[3],
@@ -421,6 +446,7 @@ class DBConnection:
 
             elif self.db_type == "mongodb":
                 db = self._mongo_db()
+                # MongoDB no tiene esquema fijo → inferir tipos desde una muestra de 20 documentos
                 sample = list(db[table_name].find({}, {"_id": 0}).limit(20))
                 if not sample:
                     return {"ok": True, "columns": []}
@@ -428,7 +454,7 @@ class DBConnection:
                 for doc in sample:
                     for k, v in doc.items():
                         if k not in all_keys:
-                            all_keys[k] = type(v).__name__
+                            all_keys[k] = type(v).__name__  # usar el tipo Python como "tipo de columna"
                 cols = [{"name": k, "type": t, "nullable": True, "default": None, "key": None}
                         for k, t in all_keys.items()]
                 return {"ok": True, "columns": cols}
@@ -438,10 +464,12 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def insert_row(self, table: str, values: dict) -> dict:
+        """Inserta una fila en la tabla usando los valores del dict."""
         try:
             if self.db_type in ("postgresql", "mysql", "sqlite"):
                 cols         = list(values.keys())
                 vals         = list(values.values())
+                # PostgreSQL/MySQL usan %s; SQLite usa ?
                 ph           = "%s" if self.db_type != "sqlite" else "?"
                 placeholders = ", ".join([ph] * len(cols))
                 col_names    = ", ".join(f'"{c}"' for c in cols)
@@ -449,7 +477,7 @@ class DBConnection:
                     f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders})', vals
                 )
                 if self.db_type == "sqlite":
-                    self._conn.commit()
+                    self._conn.commit()  # SQLite no tiene autocommit por defecto
                 return {"ok": True, "rowcount": self._cursor.rowcount}
 
             elif self.db_type == "mongodb":
@@ -458,7 +486,7 @@ class DBConnection:
                 return {"ok": True, "inserted_id": str(result.inserted_id)}
 
             elif self.db_type == "redis":
-                # values debe tener {"key": "...", "value": "..."}
+                # En Redis, "insertar" es SET key value
                 key = values.get("key", "").strip()
                 val = values.get("value", "")
                 if not key:
@@ -471,6 +499,7 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def update_row(self, table: str, pk_col: str, pk_val, values: dict) -> dict:
+        """Actualiza una fila identificada por pk_col=pk_val."""
         try:
             if self.db_type in ("postgresql", "mysql", "sqlite"):
                 ph   = "%s" if self.db_type != "sqlite" else "?"
@@ -486,6 +515,7 @@ class DBConnection:
             elif self.db_type == "mongodb":
                 from bson import ObjectId
                 db = self._mongo_db()
+                # Intentar convertir pk_val a ObjectId (formato nativo de _id en MongoDB)
                 try:
                     filter_val = ObjectId(pk_val)
                 except Exception:
@@ -494,13 +524,12 @@ class DBConnection:
                 return {"ok": True, "rowcount": result.modified_count}
 
             elif self.db_type == "redis":
-                # pk_val es la clave Redis; values tiene {"value": "..."}
+                # pk_val es la clave Redis; values tiene el nuevo valor
                 new_val = values.get("value", "")
                 ktype   = self._conn.type(pk_val)
                 if ktype == "string" or ktype == "none":
                     self._conn.set(pk_val, new_val)
                 elif ktype == "hash":
-                    # values puede ser {field: val, ...}
                     self._conn.hset(pk_val, mapping={k: v for k, v in values.items()})
                 else:
                     return {"ok": False, "error": f"Edición directa no soportada para tipo Redis '{ktype}'"}
@@ -511,6 +540,7 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def delete_row(self, table: str, pk_col: str, pk_val) -> dict:
+        """Elimina la fila donde pk_col=pk_val."""
         try:
             if self.db_type in ("postgresql", "mysql", "sqlite"):
                 ph = "%s" if self.db_type != "sqlite" else "?"
@@ -538,6 +568,7 @@ class DBConnection:
             return {"ok": False, "error": str(e)}
 
     def get_server_info(self) -> dict:
+        """Obtiene versión y metadata del servidor de BD."""
         try:
             if self.db_type == "postgresql":
                 self._cursor.execute("SELECT version()")
@@ -560,6 +591,7 @@ class DBConnection:
                 return {"ok": True, "version": sqlite3.sqlite_version}
 
             elif self.db_type == "redis":
+                # info("server") devuelve metadatos del servidor Redis
                 info = self._conn.info("server")
                 return {"ok": True, "version": info.get("redis_version", ""),
                         "uptime": info.get("uptime_in_seconds", 0)}

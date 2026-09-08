@@ -3,49 +3,61 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DBDetector — Explorador Visual</title>
+<title>DBDetector — RENACYT</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <style>
+/* ── Sistema de diseño: variables CSS ────────────────────────────────────────
+   Interfaz clásica del explorador de BD (single-project, sin orquestador).
+   Esta página permite: detectar BD, conectarse, explorar tablas y ejecutar queries.
+   Accesible desde /legacy en el servidor del orquestador, o directamente desde run.py. */
 :root {
-  --bg:            #f5f5f7;
-  --bg-card:       #ffffff;
-  --bg-elevated:   #ffffff;
-  --bg-sidebar:    #fafafa;
-  --border:        #e8e8ed;
-  --border-hover:  #d2d2d7;
-  --fg:            #1d1d1f;
-  --fg-secondary:  #424245;
-  --fg-muted:      #86868b;
-  --fg-dim:        #aeaeb2;
-  --accent:        #007AFF;
-  --accent-hover:  #0066d6;
-  --accent-light:  rgba(0,122,255,0.06);
-  --accent-medium: rgba(0,122,255,0.10);
-  --accent-strong: rgba(0,122,255,0.15);
-  --success:       #34c759;
-  --success-light: rgba(52,199,89,0.08);
-  --warning:       #ff9f0a;
-  --warning-light: rgba(255,159,10,0.08);
-  --danger:        #ff3b30;
-  --danger-light:  rgba(255,59,48,0.08);
-  --purple:        #af52de;
-  --purple-light:  rgba(175,82,222,0.08);
-  --pink:          #ff2d55;
-  --pink-light:    rgba(255,45,85,0.08);
-  --orange:        #ff9500;
-  --orange-light:  rgba(255,149,0,0.08);
-  --teal:          #5ac8fa;
-  --teal-light:    rgba(90,200,250,0.08);
-  --radius:        16px;
-  --radius-sm:     12px;
-  --radius-xs:     8px;
+  /* Fondo y superficies */
+  --bg:            #0d1117;   /* fondo principal */
+  --bg-card:       #161b22;   /* tarjetas */
+  --bg-elevated:   #1c2128;   /* elementos elevados (inputs, badges) */
+  --bg-sidebar:    #161b22;   /* sidebar */
+  /* Bordes */
+  --border:        #30363d;
+  --border-hover:  #484f57;
+  /* Texto */
+  --fg:            #e6edf3;   /* texto principal */
+  --fg-secondary:  #c9d1d9;   /* texto secundario */
+  --fg-muted:      #7d8590;   /* texto apagado */
+  --fg-dim:        #6e7681;   /* texto muy apagado */
+  /* Acento (azul GitHub) */
+  --accent:        #2f81f7;
+  --accent-hover:  #388bfd;
+  --accent-light:  rgba(47,129,247,0.1);
+  --accent-medium: rgba(47,129,247,0.15);
+  --accent-strong: rgba(47,129,247,0.2);
+  /* Estados semánticos */
+  --success:       #3fb950;
+  --success-light: rgba(63,185,80,0.12);
+  --warning:       #e3b341;
+  --warning-light: rgba(227,179,65,0.12);
+  --danger:        #f85149;
+  --danger-light:  rgba(248,81,73,0.12);
+  /* Colores adicionales para badges de tipo de BD */
+  --purple:        #bc8cff;
+  --purple-light:  rgba(188,140,255,0.1);
+  --pink:          #ff7b93;
+  --pink-light:    rgba(255,123,147,0.1);
+  --orange:        #ffa657;
+  --orange-light:  rgba(255,166,87,0.1);
+  --teal:          #39d353;
+  --teal-light:    rgba(57,211,83,0.1);
+  /* Bordes redondeados */
+  --radius:        12px;
+  --radius-sm:     10px;
+  --radius-xs:     6px;
   --radius-pill:   100px;
-  --shadow-xs:     0 1px 2px rgba(0,0,0,0.04);
-  --shadow-sm:     0 1px 3px rgba(0,0,0,0.04), 0 4px 8px rgba(0,0,0,0.02);
-  --shadow-md:     0 2px 8px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.03);
-  --shadow-lg:     0 4px 16px rgba(0,0,0,0.06), 0 16px 48px rgba(0,0,0,0.04);
-  --shadow-xl:     0 8px 32px rgba(0,0,0,0.08), 0 24px 64px rgba(0,0,0,0.06);
+  /* Sombras escalonadas por elevación */
+  --shadow-xs:     0 1px 2px rgba(0,0,0,0.4);
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.5), 0 4px 8px rgba(0,0,0,0.3);
+  --shadow-md:     0 2px 8px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.4);
+  --shadow-lg:     0 4px 16px rgba(0,0,0,0.7), 0 16px 48px rgba(0,0,0,0.5);
+  --shadow-xl:     0 8px 32px rgba(0,0,0,0.8), 0 24px 64px rgba(0,0,0,0.6);
 }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -308,7 +320,7 @@ body {
 .dash-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 24px;
-  background: rgba(255,255,255,0.85); backdrop-filter: blur(20px);
+  background: rgba(22,27,34,0.85); backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 100; flex-shrink: 0;
 }
@@ -395,7 +407,7 @@ body {
   padding: 9px 14px 9px 16px; cursor: pointer;
   transition: all 0.15s; border-left: 3px solid transparent;
 }
-.sidebar-item:hover  { background: rgba(0,0,0,0.02); }
+.sidebar-item:hover  { background: rgba(255,255,255,0.04); }
 .sidebar-item.active { background: var(--accent-light); border-left-color: var(--accent); }
 .sidebar-item-icon {
   width: 30px; height: 30px; border-radius: 8px;
@@ -715,7 +727,7 @@ td.editing input {
   font-size: 13px; font-family: inherit; background: var(--accent-light);
   outline: none; color: var(--fg);
 }
-td.editing input:focus { background: #fff; }
+td.editing input:focus { background: var(--bg-elevated); }
 .add-row-bar {
   display: flex; align-items: center; justify-content: center;
   padding: 10px; border-top: 1px dashed var(--border);

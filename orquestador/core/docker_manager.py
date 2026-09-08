@@ -7,7 +7,9 @@ import subprocess
 import time
 
 
-# ── Templates (moved from server.py) ──────────────────────────────────────────
+# ── Plantillas de docker-compose ──────────────────────────────────────────────
+# Cada plantilla genera un docker-compose.yml mínimo para la BD detectada.
+# Los campos {port}, {user}, {password}, {database} se reemplazan en tiempo de ejecución.
 
 _COMPOSE_TEMPLATES = {
     "postgresql": """\
@@ -62,6 +64,7 @@ services:
 """,
 }
 
+# Puerto estándar de cada BD (dentro del contenedor)
 _DB_DEFAULT_PORTS = {
     "postgresql": 5432,
     "mysql":      3306,
@@ -69,6 +72,7 @@ _DB_DEFAULT_PORTS = {
     "redis":      6379,
 }
 
+# Puerto del contenedor para cada motor (usado para mapear host→contenedor)
 _DB_CONTAINER_PORTS = {
     "postgresql": 5432,
     "mysql":      3306,
@@ -77,6 +81,7 @@ _DB_CONTAINER_PORTS = {
     "redis":      6379,
 }
 
+# Variables de entorno que cada BD usa para user/password/database en docker-compose
 _DB_ENV_FIELDS = {
     "postgresql": {"user": ["POSTGRES_USER"], "password": ["POSTGRES_PASSWORD"], "database": ["POSTGRES_DB"]},
     "mysql":      {"user": ["MYSQL_USER", "MARIADB_USER"], "password": ["MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "MARIADB_PASSWORD", "MARIADB_ROOT_PASSWORD"], "database": ["MYSQL_DATABASE", "MARIADB_DATABASE"]},
@@ -86,15 +91,17 @@ _DB_ENV_FIELDS = {
 }
 
 
-# ── Helpers (moved from server.py) ────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _find_free_port() -> int:
+    # Pedir al SO un puerto libre (bind en 0 → el SO asigna uno disponible)
     with socket.socket() as s:
         s.bind(("", 0))
         return s.getsockname()[1]
 
 
 def _port_in_use(port: int) -> bool:
+    # Intentar conectar al puerto: si hay respuesta → está ocupado
     try:
         with socket.create_connection(("localhost", port), timeout=0.5):
             return True
@@ -103,8 +110,13 @@ def _port_in_use(port: int) -> bool:
 
 
 def _patch_compose_ports(compose_file: str) -> tuple[str, dict]:
+    """
+    Lee el compose.yml y reemplaza cualquier puerto host que esté ocupado
+    por un puerto libre. Devuelve (contenido_parcheado, mapa_de_cambios).
+    """
     with open(compose_file, encoding="utf-8", errors="replace") as f:
         content = f.read()
+    # Buscar todos los mapeos host:contenedor (ej. "5432:5432" o '5432:5432')
     pattern = re.compile(r'(["\']?)(\d+)(:)(\d+)(["\']?)')
     port_remaps = {}
     for m in pattern.finditer(content):
@@ -112,6 +124,7 @@ def _patch_compose_ports(compose_file: str) -> tuple[str, dict]:
         if host_port in port_remaps:
             continue
         if _port_in_use(int(host_port)):
+            # Puerto ocupado → buscar uno libre y anotar el cambio
             new_port = str(_find_free_port())
             port_remaps[host_port] = new_port
     if not port_remaps:
@@ -126,6 +139,10 @@ def _patch_compose_ports(compose_file: str) -> tuple[str, dict]:
 
 
 def _get_compose_running_ports(compose_file: str) -> dict:
+    """
+    Consulta a Docker qué puertos están publicados actualmente.
+    Devuelve {puerto_contenedor: puerto_host}.
+    """
     try:
         r = subprocess.run(
             ["docker", "compose", "-f", compose_file, "ps", "--format", "json"],
@@ -140,8 +157,8 @@ def _get_compose_running_ports(compose_file: str) -> dict:
                 if svc.get("State") != "running":
                     continue
                 for pub in svc.get("Publishers", []):
-                    target    = pub.get("TargetPort")
-                    published = pub.get("PublishedPort")
+                    target    = pub.get("TargetPort")   # puerto dentro del contenedor
+                    published = pub.get("PublishedPort") # puerto en el host
                     if target and published:
                         ports[target] = published
             except Exception:
@@ -152,6 +169,10 @@ def _get_compose_running_ports(compose_file: str) -> dict:
 
 
 def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
+    """
+    Parsea un docker-compose.yml con regex para extraer host_port, user, password, database.
+    No usa librería YAML para evitar dependencias externas.
+    """
     try:
         with open(compose_file, encoding="utf-8", errors="replace") as f:
             content = f.read()
@@ -160,9 +181,11 @@ def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
     container_port = _DB_CONTAINER_PORTS.get(db_type)
     info = {}
     if container_port:
+        # Buscar el mapeo host:contenedor para este tipo de BD
         m = re.search(r'["\']?(\d+):' + str(container_port) + r'["\']?', content)
         if m:
             info["host_port"] = int(m.group(1))
+    # Extraer credenciales de las variables de entorno del compose
     env_map = _DB_ENV_FIELDS.get(db_type, {})
     for field, env_vars in env_map.items():
         for var in env_vars:
@@ -173,7 +196,9 @@ def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
     return info
 
 
-# ── DockerManager class ────────────────────────────────────────────────────────
+# ── DockerManager ──────────────────────────────────────────────────────────────
+# Gestiona contenedores Docker para proyectos que tienen BD.
+# Sabe crear redes, levantar/bajar compose, parchear puertos en conflicto.
 
 class DockerManager:
 
@@ -181,12 +206,13 @@ class DockerManager:
         return shutil.which("docker") is not None
 
     def create_network(self, project_name: str) -> bool:
+        # Red Docker aislada por proyecto (orq_<nombre>_net)
         net = f"orq_{project_name}_net"
         r = subprocess.run(
             ["docker", "network", "create", net],
             capture_output=True, encoding="utf-8", errors="replace"
         )
-        # returncode 1 with "already exists" is fine
+        # returncode 1 con "already exists" es aceptable → idempotente
         return r.returncode == 0 or "already exists" in r.stderr
 
     def remove_network(self, project_name: str) -> bool:
@@ -199,8 +225,9 @@ class DockerManager:
 
     def up(self, project_path: str, network_name: str, port_mapping: dict) -> dict:
         if not self.is_docker_available():
-            return {"ok": False, "error": "Docker no está instalado"}
+            return {"ok": False, "error": f"{'docker'} no está instalado"}
 
+        # Buscar el compose.yml en el directorio del proyecto
         compose_names = ("docker-compose.yml", "docker-compose.yaml",
                          "docker-compose.override.yml", "compose.yml", "compose.yaml")
         compose_file = None
@@ -212,13 +239,16 @@ class DockerManager:
         if not compose_file:
             return {"ok": False, "error": "No se encontró docker-compose.yml en el proyecto"}
 
+        # Si ya hay contenedores corriendo, no parchear puertos (ya están asignados)
         running_ports = _get_compose_running_ports(compose_file)
         original_content = None
         port_remaps = {}
         if not running_ports:
             try:
+                # Parchear puertos en conflicto antes de levantar
                 patched_content, port_remaps = _patch_compose_ports(compose_file)
                 if port_remaps:
+                    # Guardar el contenido original para restaurar si falla
                     with open(compose_file, encoding="utf-8", errors="replace") as f:
                         original_content = f.read()
                     with open(compose_file, "w", encoding="utf-8") as f:
@@ -232,7 +262,7 @@ class DockerManager:
                 capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                 cwd=os.path.dirname(compose_file)
             )
-            # Container conflict: already exists from previous up attempt → down + retry
+            # Si falla por conflicto de nombres de contenedor → bajar y reintentar una vez
             if result.returncode != 0 and any(
                 k in (result.stderr + result.stdout)
                 for k in ("already in use", "Conflict", "already exists")
@@ -248,6 +278,7 @@ class DockerManager:
                     cwd=os.path.dirname(compose_file)
                 )
             if result.returncode != 0:
+                # Restaurar compose original si el arranque falló tras parchear
                 if original_content is not None:
                     with open(compose_file, "w", encoding="utf-8") as f:
                         f.write(original_content)
@@ -276,9 +307,10 @@ class DockerManager:
                 compose_file = candidate
                 break
         if not compose_file:
-            return {"ok": True}  # nothing to stop
+            return {"ok": True}  # No hay compose → nada que parar
 
         try:
+            # --volumes: también elimina los volúmenes anónimos (datos de la BD)
             r = subprocess.run(
                 ["docker", "compose", "-f", compose_file, "down", "--volumes"],
                 capture_output=True, encoding="utf-8", errors="replace", timeout=60,
@@ -301,6 +333,7 @@ class DockerManager:
         if not compose_file:
             return {}
         try:
+            # Obtener estado de cada servicio en el compose
             r = subprocess.run(
                 ["docker", "compose", "-f", compose_file, "ps", "--format", "json"],
                 capture_output=True, encoding="utf-8", errors="replace", timeout=10,
@@ -321,6 +354,7 @@ class DockerManager:
 
     def generate_compose(self, project_path: str, db_type: str,
                          credentials: dict, ports: dict) -> str:
+        """Genera un docker-compose.yml a partir de la plantilla para la BD detectada."""
         template = _COMPOSE_TEMPLATES.get(db_type)
         if not template or not project_path or not os.path.isdir(project_path):
             return ""
@@ -332,10 +366,11 @@ class DockerManager:
         database = credentials.get("database") or db_type
 
         if db_type == "redis":
+            # Redis no usa user/password en variables de entorno → usa argumento de comando
             redis_cmd = f'"redis-server --requirepass {password}"' if password else "redis-server"
             content = template.format(port=port, redis_cmd=redis_cmd)
         elif db_type == "mongodb" and not (user and password):
-            # No-auth MongoDB: omit MONGO_INITDB_ROOT_* so container starts without auth
+            # MongoDB sin auth: no incluir MONGO_INITDB_ROOT_* para que arranque sin auth
             content = (
                 "version: '3.8'\n"
                 "services:\n"
@@ -346,6 +381,7 @@ class DockerManager:
                 f"    restart: unless-stopped\n"
             )
         else:
+            # Usar credenciales detectadas o defaults seguros si están vacías
             _user = user or "dbuser"
             _pass = password or "dbpass"
             content = template.format(port=port, user=_user, password=_pass, database=database)
@@ -365,6 +401,7 @@ class DockerManager:
         return _get_compose_running_ports(compose_file)
 
     def wait_for_port(self, host: str, port: int, timeout: int = 30) -> bool:
+        # Intentar conectar al puerto una vez por segundo hasta timeout
         for _ in range(timeout):
             try:
                 with socket.create_connection((host, int(port)), timeout=1):

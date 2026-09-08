@@ -14,15 +14,16 @@ from flask import Flask, request, jsonify, send_from_directory, Response
 # Add parent to path for core imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.orchestrator import Orchestrator
+from core.orchestrator import Gestor
 from core.detector import DatabaseDetector
 from core.connector import DBConnection
 
-# ── Storage path relative to this file's grandparent ─────────────────────────
+# ── Ruta de almacenamiento relativa al directorio padre del padre de este archivo
 _ROOT = Path(__file__).parent.parent
 _DB_PATH = str(_ROOT / "storage" / "projects.db")
 
-orchestrator = Orchestrator(_DB_PATH)
+# Instancia única del Gestor que maneja todos los proyectos
+gestor = Gestor(_DB_PATH)
 app = Flask(__name__, static_folder=str(_ROOT / "static"))
 
 # ── Legacy _state (for backwards-compatible single-project endpoints) ─────────
@@ -46,7 +47,7 @@ def api_projects_add():
     path = data.get("path", "").strip()
     if not path:
         return jsonify({"error": "Proporciona una ruta de proyecto"}), 400
-    result = orchestrator.add_project(path)
+    result = gestor.add_project(path)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result), 201
@@ -58,7 +59,7 @@ def api_projects_scan_folder():
     folder = data.get("folder", "").strip()
     if not folder:
         return jsonify({"error": "Proporciona una carpeta"}), 400
-    result = orchestrator.scan_folder(folder)
+    result = gestor.scan_folder(folder)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result)
@@ -66,12 +67,12 @@ def api_projects_scan_folder():
 
 @app.route("/api/projects", methods=["GET"])
 def api_projects_list():
-    return jsonify(orchestrator.list_projects())
+    return jsonify(gestor.list_projects())
 
 
 @app.route("/api/projects/<name>", methods=["GET"])
 def api_projects_status(name):
-    row = orchestrator.status(name)
+    row = gestor.status(name)
     if not row:
         return jsonify({"error": f"Proyecto '{name}' no encontrado"}), 404
     return jsonify(row)
@@ -79,7 +80,7 @@ def api_projects_status(name):
 
 @app.route("/api/projects/<name>", methods=["DELETE"])
 def api_projects_remove(name):
-    result = orchestrator.remove_project(name)
+    result = gestor.remove_project(name)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify({"ok": True})
@@ -87,7 +88,7 @@ def api_projects_remove(name):
 
 @app.route("/api/projects/<name>/up", methods=["POST"])
 def api_projects_up(name):
-    result = orchestrator.up(name)
+    result = gestor.up(name)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result)
@@ -95,7 +96,7 @@ def api_projects_up(name):
 
 @app.route("/api/projects/<name>/down", methods=["POST"])
 def api_projects_down(name):
-    result = orchestrator.down(name)
+    result = gestor.down(name)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result)
@@ -103,7 +104,7 @@ def api_projects_down(name):
 
 @app.route("/api/projects/<name>/restart", methods=["POST"])
 def api_projects_restart(name):
-    result = orchestrator.restart(name)
+    result = gestor.restart(name)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result)
@@ -112,12 +113,12 @@ def api_projects_restart(name):
 @app.route("/api/projects/<name>/logs", methods=["GET"])
 def api_projects_logs(name):
     lines = int(request.args.get("lines", 200))
-    return jsonify({"logs": orchestrator.get_logs(name, lines)})
+    return jsonify({"logs": gestor.get_logs(name, lines)})
 
 
 @app.route("/api/projects/<name>/query", methods=["POST"])
 def api_projects_query(name):
-    conn = orchestrator.get_connection(name)
+    conn = gestor.get_connection(name)
     if not conn:
         return jsonify({"error": f"No se pudo conectar al proyecto '{name}'"}), 400
     data  = request.json or {}
@@ -129,7 +130,7 @@ def api_projects_query(name):
 
 @app.route("/api/projects/<name>/tables", methods=["GET"])
 def api_projects_tables(name):
-    conn = orchestrator.get_connection(name)
+    conn = gestor.get_connection(name)
     if not conn:
         return jsonify({"error": f"No se pudo conectar al proyecto '{name}'"}), 400
     return jsonify(conn.list_tables())
@@ -137,7 +138,7 @@ def api_projects_tables(name):
 
 @app.route("/api/projects/<name>/export", methods=["POST"])
 def api_projects_export(name):
-    conn = orchestrator.get_connection(name)
+    conn = gestor.get_connection(name)
     if not conn:
         return jsonify({"error": f"No se pudo conectar al proyecto '{name}'"}), 400
     data   = request.json or {}
@@ -156,12 +157,12 @@ def api_projects_export(name):
 
 @app.route("/api/projects/up-all", methods=["POST"])
 def api_projects_up_all():
-    return jsonify(orchestrator.up_all())
+    return jsonify(gestor.up_all())
 
 
 @app.route("/api/projects/down-all", methods=["POST"])
 def api_projects_down_all():
-    return jsonify(orchestrator.down_all())
+    return jsonify(gestor.down_all())
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -645,7 +646,7 @@ def main():
     port = int(os.environ.get("PORT", 7433))
     url  = f"http://localhost:{port}"
     print(f"\n{'─'*50}")
-    print(f"  ORQUESTADOR corriendo en {url}")
+    print(f"  GESTOR corriendo en {url}")
     print(f"  Interfaz clasica: {url}/legacy")
     print(f"{'─'*50}\n")
     if "--no-browser" not in sys.argv:
