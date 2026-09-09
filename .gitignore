@@ -1,1 +1,16 @@
-orquestador/core/__pycache__/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Registro / datos runtime del orquestador
+orquestador/storage/
+*.db
+.orquestador/
+
+# Config de BD que el orquestador escribe dentro de los proyectos
+.orq_native.json
+
+# Entornos
+.venv/
+venv/

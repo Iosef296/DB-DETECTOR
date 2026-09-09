@@ -1,6 +1,8 @@
 import os
 import sys
+import hmac
 import json
+import secrets
 import platform
 import threading
 import webbrowser
@@ -9,7 +11,9 @@ from pathlib import Path
 
 _IS_WINDOWS = platform.system() == "Windows"
 
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import (
+    Flask, request, jsonify, send_from_directory, Response, session, redirect
+)
 
 # Add parent to path for core imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -17,14 +21,109 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.orchestrator import Gestor
 from core.detector import DatabaseDetector
 from core.connector import DBConnection
+from core.paths import data_root
+from core.manager_factory import get_manager_name
 
-# ── Ruta de almacenamiento relativa al directorio padre del padre de este archivo
 _ROOT = Path(__file__).parent.parent
-_DB_PATH = str(_ROOT / "storage" / "projects.db")
+
+# ── Ruta del SQLite del registro ─────────────────────────────────────────────
+# - Si ORQ_DATA_DIR está seteado (Railway/contenedor) → <ORQ_DATA_DIR>/projects.db
+# - Si no, y existe el SQLite legacy en orquestador/storage → usarlo (no romper local)
+# - Si no → <data_root()>/projects.db  (~/.orquestador/projects.db)
+_LEGACY_DB = _ROOT / "storage" / "projects.db"
+if os.environ.get("ORQ_DATA_DIR"):
+    _DB_PATH = os.path.join(data_root(), "projects.db")
+elif _LEGACY_DB.exists():
+    _DB_PATH = str(_LEGACY_DB)
+else:
+    _DB_PATH = os.path.join(data_root(), "projects.db")
 
 # Instancia única del Gestor que maneja todos los proyectos
 gestor = Gestor(_DB_PATH)
 app = Flask(__name__, static_folder=str(_ROOT / "static"))
+
+# ── Autenticación ────────────────────────────────────────────────────────────
+# Auth activa sólo si ORQ_PASSWORD está seteada. Local (swithout env) → abierto,
+# igual que antes. En Railway el deploy DEBE setear ORQ_PASSWORD.
+_AUTH_PASSWORD = os.environ.get("ORQ_PASSWORD", "")
+_AUTH_ENABLED  = bool(_AUTH_PASSWORD)
+
+# secret_key para firmar la cookie de sesión. ORQ_SECRET si existe; si no, se
+# genera una y se persiste en <data_root>/.secret para sobrevivir reinicios.
+_secret = os.environ.get("ORQ_SECRET", "")
+if not _secret:
+    _secret_file = os.path.join(data_root(), ".secret")
+    try:
+        if os.path.isfile(_secret_file):
+            _secret = open(_secret_file, encoding="utf-8").read().strip()
+        if not _secret:
+            _secret = secrets.token_hex(32)
+            with open(_secret_file, "w", encoding="utf-8") as _f:
+                _f.write(_secret)
+    except Exception:
+        _secret = secrets.token_hex(32)
+app.secret_key = _secret
+
+# Rutas accesibles sin sesión
+_PUBLIC_PATHS = {"/login", "/logout", "/healthz", "/favicon.ico"}
+
+
+@app.before_request
+def _require_auth():
+    if not _AUTH_ENABLED:
+        return None
+    p = request.path
+    if p in _PUBLIC_PATHS or p.startswith("/static/"):
+        return None
+    if session.get("auth"):
+        return None
+    if p.startswith("/api/"):
+        return jsonify({"error": "No autenticado", "auth_required": True}), 401
+    return redirect("/login")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not _AUTH_ENABLED:
+        return redirect("/")
+    if request.method == "GET":
+        return send_from_directory(str(_ROOT / "static"), "login.html")
+    try:
+        body_pw = (request.json or {}).get("password") if request.is_json else None
+    except Exception:
+        body_pw = None
+    given = request.form.get("password") or body_pw or ""
+    if hmac.compare_digest(given, _AUTH_PASSWORD):
+        session["auth"] = True
+        session.permanent = True
+        return redirect("/")
+    return redirect("/login?e=1")
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
+@app.route("/healthz")
+def healthz():
+    return jsonify({"ok": True})
+
+
+@app.route("/api/manager")
+def api_manager():
+    mode = get_manager_name()
+    info = {"mode": mode, "available_dbs": [], "cached_dbs": []}
+    try:
+        mgr = gestor.docker
+        if hasattr(mgr, "available_dbs"):
+            info["available_dbs"] = mgr.available_dbs()
+        if hasattr(mgr, "cached_dbs"):
+            info["cached_dbs"] = mgr.cached_dbs()
+    except Exception:
+        pass
+    return jsonify(info)
 
 # ── Legacy _state (for backwards-compatible single-project endpoints) ─────────
 _state = {
@@ -60,6 +159,38 @@ def api_projects_scan_folder():
     if not folder:
         return jsonify({"error": "Proporciona una carpeta"}), 400
     result = gestor.scan_folder(folder)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result)
+
+
+@app.route("/api/projects/git", methods=["POST"])
+def api_projects_git():
+    data = request.json or {}
+    url = (data.get("url") or "").strip()
+    ref = (data.get("ref") or "").strip() or None
+    if not url:
+        return jsonify({"error": "Proporciona la URL del repositorio"}), 400
+    result = gestor.add_project_from_git(url, ref)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result), 201
+
+
+@app.route("/api/projects/zip", methods=["POST"])
+def api_projects_zip():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "Sube un archivo .zip"}), 400
+    result = gestor.add_project_from_zip(f)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result), 201
+
+
+@app.route("/api/projects/<name>/refresh", methods=["POST"])
+def api_projects_refresh(name):
+    result = gestor.refresh_project(name)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result)
@@ -648,6 +779,8 @@ def main():
     print(f"\n{'─'*50}")
     print(f"  GESTOR corriendo en {url}")
     print(f"  Interfaz clasica: {url}/legacy")
+    print(f"  Auth: {'ACTIVA (ORQ_PASSWORD)' if _AUTH_ENABLED else 'abierta (sin ORQ_PASSWORD)'}")
+    print(f"  Datos: {data_root()}")
     print(f"{'─'*50}\n")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()

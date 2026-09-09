@@ -1,0 +1,8 @@
+flask==3.0.3
+gunicorn==22.0.0
+click==8.1.7
+rich==13.7.1
+psycopg2-binary==2.9.9
+pymysql==1.1.1
+pymongo==4.8.0
+redis==5.0.8

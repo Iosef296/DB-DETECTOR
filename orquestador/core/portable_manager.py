@@ -26,10 +26,17 @@ import zipfile
 import urllib.request
 
 from core.native_manager import NativeManager
+from core.paths import data_root
 
-# Directorio base donde se guardan todos los binarios descargados
-BINS_DIR = os.path.expanduser("~/.orquestador/bins")
 _PG_VERSION = "16.4.0"
+
+
+def _bins_dir() -> str:
+    # Directorio base de los binarios descargados. Se resuelve en cada llamada
+    # para respetar ORQ_DATA_DIR (volumen de Railway) aunque cambie tras el import.
+    path = os.path.join(data_root(), "bins")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 # ── Detección de plataforma ────────────────────────────────────────────────────
@@ -243,8 +250,6 @@ class PortableManager(NativeManager):
     Después de la primera descarga, funciona completamente offline.
     """
 
-    BINS_DIR = BINS_DIR
-
     # ── Búsqueda en catálogo ──────────────────────────────────────────────────
 
     def _release(self, db_type: str) -> dict | None:
@@ -252,7 +257,7 @@ class PortableManager(NativeManager):
         return _CATALOG.get(system, {}).get(machine, {}).get(db_type)
 
     def _bin_dir(self, db_type: str) -> str:
-        return os.path.join(BINS_DIR, db_type)
+        return os.path.join(_bins_dir(), db_type)
 
     def _portable_bin(self, db_type: str, name: str) -> str | None:
         """Devuelve la ruta completa al binario portable si ya está descargado y es ejecutable."""

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entrar · Gestor DB-Detector</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+:root{
+  --bg:#0d1117; --surface:#161b22; --surface-2:#1c2128; --border:#30363d;
+  --text:#e6edf3; --muted:#7d8590; --accent:#2f81f7; --accent-hi:#388bfd; --error:#f85149;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,"Segoe UI",Inter,system-ui,sans-serif;
+  background:var(--bg);color:var(--text);
+  display:flex;align-items:center;justify-content:center;height:100vh;font-size:14px;
+}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:32px;width:340px;max-width:calc(100vw - 32px);
+}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}
+.brand-icon{
+  width:34px;height:34px;border-radius:8px;background:var(--surface-2);
+  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--accent)
+}
+.brand-title{font-weight:600}
+.brand-sub{font-size:12px;color:var(--muted)}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+input{
+  width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--text);
+  border-radius:8px;padding:10px 12px;font-size:14px;outline:none
+}
+input:focus{border-color:var(--accent)}
+button{
+  width:100%;margin-top:16px;background:var(--accent);color:#fff;border:0;
+  border-radius:8px;padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer
+}
+button:hover{background:var(--accent-hi)}
+.err{margin-top:12px;font-size:12px;color:var(--error);display:none}
+.err.show{display:block}
+</style>
+</head>
+<body>
+<form class="card" method="POST" action="/login">
+  <div class="brand">
+    <div class="brand-icon"><i class="fa fa-database"></i></div>
+    <div>
+      <div class="brand-title">DB-Detector</div>
+      <div class="brand-sub">Gestor</div>
+    </div>
+  </div>
+  <label for="password">Contraseña</label>
+  <input id="password" name="password" type="password" autofocus autocomplete="current-password">
+  <button type="submit">Entrar</button>
+  <div class="err" id="err">Contraseña incorrecta</div>
+</form>
+<script>
+  // El servidor redirige a /login?e=1 cuando la contraseña falla.
+  if (new URL(location.href).searchParams.has('e')) {
+    document.getElementById('err').classList.add('show');
+  }
+</script>
+</body>
+</html>
