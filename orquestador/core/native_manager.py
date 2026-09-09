@@ -243,6 +243,46 @@ class NativeManager:
         os.makedirs(path, exist_ok=True)
         return path
 
+    # ── Bajada de privilegios (contenedores que corren como root, ej. Railway) ─
+    # PostgreSQL (initdb/postgres) se niega a correr como root. En un contenedor
+    # que arranca como root hay que ejecutar esos procesos con un uid sin privilegios.
+
+    def _unprivileged_ids(self) -> "tuple[int, int] | None":
+        """(uid, gid) sin privilegios si el proceso actual es root; None si no aplica."""
+        if not hasattr(os, "geteuid"):
+            return None  # Windows
+        try:
+            if os.geteuid() != 0:
+                return None  # ya somos no-root, nada que hacer
+        except Exception:
+            return None
+        uid = int(os.environ.get("ORQ_UNPRIVILEGED_UID", "1000"))
+        gid = int(os.environ.get("ORQ_UNPRIVILEGED_GID", str(uid)))
+        return uid, gid
+
+    def _su_kwargs(self, *chown_dirs: str) -> dict:
+        """Devuelve kwargs {user,group} para subprocess y hace chown recursivo de
+        los directorios dados para que el proceso no-root pueda escribir en ellos.
+        Vacío si no hace falta bajar privilegios (no somos root, o Windows)."""
+        ids = self._unprivileged_ids()
+        if not ids:
+            return {}
+        uid, gid = ids
+        for d in chown_dirs:
+            if not d or not os.path.isdir(d):
+                continue
+            try:
+                os.chown(d, uid, gid)
+                for root_, dnames, fnames in os.walk(d):
+                    for name in dnames + fnames:
+                        try:
+                            os.chown(os.path.join(root_, name), uid, gid)
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        return {"user": uid, "group": gid}
+
     # ── Métodos de inicio de BD ───────────────────────────────────────────────
 
     def _start_postgresql(self, data_dir: str, port: int,
@@ -256,6 +296,9 @@ class NativeManager:
         env      = self._proc_env("postgresql")
         pg_data  = os.path.join(data_dir, "pgdata")  # directorio de datos de PostgreSQL
         log_file = os.path.join(data_dir, "postgresql.log")
+        # HOME explícito: initdb/postgres lo consultan y el uid sin privilegios
+        # puede no tener entrada en /etc/passwd.
+        env["HOME"] = data_dir
 
         # postmaster.pid existe si y solo si PostgreSQL arrancó correctamente.
         # Contiene: PID (línea 0), data dir (línea 1), hora de inicio (línea 2), puerto (línea 3).
@@ -281,7 +324,8 @@ class NativeManager:
                 # (esperar a que todos los clientes se desconecten) para no bloquear indefinidamente.
                 subprocess.run(
                     [pg_ctl, "-D", pg_data, "stop", "-m", "fast"],
-                    capture_output=True, encoding="utf-8", env=env
+                    capture_output=True, encoding="utf-8", env=env,
+                    **self._su_kwargs(data_dir)
                 )
             except (ProcessLookupError, PermissionError):
                 pass  # PID stale → el proceso ya no existe, ignorar y arrancar
@@ -303,10 +347,12 @@ class NativeManager:
             pwfile = os.path.join(data_dir, ".pgpass")
             with open(pwfile, "w") as f:
                 f.write(password + "\n")
+            # chown del árbol de datos ANTES de initdb (incluye pg_data y pwfile recién creados)
+            su = self._su_kwargs(data_dir)
             r = subprocess.run(
                 [initdb, "-D", pg_data, "-U", user or "postgres",
                  "--auth=md5", f"--pwfile={pwfile}"],
-                capture_output=True, encoding="utf-8", env=env
+                capture_output=True, encoding="utf-8", env=env, **su
             )
             try:
                 os.remove(pwfile)
@@ -320,7 +366,7 @@ class NativeManager:
                 # de desarrollo esto es aceptable.
                 r = subprocess.run(
                     [initdb, "-D", pg_data, "-U", user or "postgres"],
-                    capture_output=True, encoding="utf-8", env=env
+                    capture_output=True, encoding="utf-8", env=env, **su
                 )
                 if r.returncode != 0:
                     return {"ok": False, "error": f"initdb: {r.stderr.strip()}"}
@@ -328,7 +374,8 @@ class NativeManager:
         # Arrancar el servidor en el puerto asignado
         r = subprocess.run(
             [pg_ctl, "-D", pg_data, "-l", log_file, "-o", f"-p {port}", "-w", "start"],
-            capture_output=True, encoding="utf-8", env=env
+            capture_output=True, encoding="utf-8", env=env,
+            **self._su_kwargs(data_dir)
         )
         output = r.stdout + r.stderr
         if r.returncode == 0 or "server started" in output or "already running" in output:
@@ -352,7 +399,8 @@ class NativeManager:
             return {"ok": True}
         r = subprocess.run(
             [pg_ctl, "-D", pg_data, "stop", "-m", "fast"],
-            capture_output=True, encoding="utf-8", env=self._proc_env("postgresql")
+            capture_output=True, encoding="utf-8", env=self._proc_env("postgresql"),
+            **self._su_kwargs(data_dir)
         )
         # "not running" también es éxito → ya estaba parado
         ok = r.returncode == 0 or "not running" in (r.stdout + r.stderr)
@@ -371,13 +419,24 @@ class NativeManager:
         pid_file    = os.path.join(data_dir, "mysql.pid")
         socket_file = os.path.join(data_dir, "mysql.sock")
 
+        # En contenedor root: mysqld hace su propia bajada de privilegios con --user=<uid>.
+        # Le damos el uid sin privilegios y le hacemos chown del datadir.
+        ids = self._unprivileged_ids()
+        user_args = []
+        if ids:
+            uid, gid = ids
+            self._su_kwargs(data_dir)  # chown recursivo del datadir
+            user_args = [f"--user={uid}"]
+        elif os.getenv("USER"):
+            user_args = [f"--user={os.getenv('USER')}"]
+
         # Inicializar directorio de datos si es la primera vez
         if not os.path.isdir(mysql_data):
             os.makedirs(mysql_data, exist_ok=True)
+            self._su_kwargs(data_dir)  # el datadir nuevo también debe ser del uid
             r = subprocess.run(
                 [mysqld, "--initialize-insecure",
-                 f"--datadir={mysql_data}",
-                 f"--user={os.getenv('USER', 'mysql')}"],
+                 f"--datadir={mysql_data}"] + user_args,
                 capture_output=True, encoding="utf-8", env=env
             )
             if r.returncode != 0:
@@ -391,7 +450,7 @@ class NativeManager:
         proc = subprocess.Popen(
             [mysqld, f"--datadir={mysql_data}", f"--port={port}",
              f"--socket={socket_file}", f"--pid-file={pid_file}",
-             f"--log-error={log_file}"],
+             f"--log-error={log_file}"] + user_args,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env
         )
         return {"ok": True, "pid": proc.pid}
