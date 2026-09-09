@@ -339,7 +339,7 @@ select.styled:focus { border-color: var(--accent); }
       <div class="brand-icon"><i class="fa fa-database"></i></div>
       <div>
         <div class="brand-text">DB-Detector</div>
-        <div class="brand-sub">Gestor</div>
+        <div class="brand-sub">Gestor · <span id="mode-badge" style="font-weight:600">—</span></div>
       </div>
     </div>
     <div class="sidebar-actions">
@@ -368,15 +368,44 @@ select.styled:focus { border-color: var(--accent); }
 <div class="modal-bg" id="modal">
   <div class="modal">
     <h3>Agregar Proyecto</h3>
-    <p class="modal-sub">Ingresa la ruta al proyecto para detectar su base de datos y framework.</p>
-    <div style="display:flex;gap:8px;margin-bottom:8px">
-      <input id="modal-path" type="text" placeholder="/ruta/al/proyecto" style="flex:1">
-      <button class="btn" onclick="detectProject()"><i class="fa fa-search"></i> Detectar</button>
+    <div class="add-tabs" style="display:flex;gap:6px;margin:4px 0 12px">
+      <button class="btn add-tab" data-tab="local" onclick="addTab('local')">Ruta local</button>
+      <button class="btn add-tab" data-tab="git"   onclick="addTab('git')">Git URL</button>
+      <button class="btn add-tab" data-tab="zip"   onclick="addTab('zip')">Subir ZIP</button>
     </div>
-    <div id="preview-box"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">Cancelar</button>
-      <button class="btn primary" id="btn-confirm" onclick="confirmAdd()" disabled>Confirmar</button>
+
+    <div id="add-local" class="add-pane">
+      <p class="modal-sub">Ruta del proyecto en este servidor.</p>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <input id="modal-path" type="text" placeholder="/ruta/al/proyecto" style="flex:1">
+        <button class="btn" onclick="detectProject()"><i class="fa fa-search"></i> Detectar</button>
+      </div>
+      <div id="preview-box"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeModal()">Cancelar</button>
+        <button class="btn primary" id="btn-confirm" onclick="confirmAdd()" disabled>Confirmar</button>
+      </div>
+    </div>
+
+    <div id="add-git" class="add-pane" style="display:none">
+      <p class="modal-sub">Se clona el repositorio y se detecta su base de datos.</p>
+      <input id="git-url" type="text" placeholder="https://github.com/usuario/repo" style="margin-bottom:8px">
+      <input id="git-ref" type="text" placeholder="rama (opcional)" style="margin-bottom:8px">
+      <div id="git-msg" style="font-size:12px;color:var(--muted)"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeModal()">Cancelar</button>
+        <button class="btn primary" onclick="confirmGit()"><i class="fa fa-code-branch"></i> Clonar y agregar</button>
+      </div>
+    </div>
+
+    <div id="add-zip" class="add-pane" style="display:none">
+      <p class="modal-sub">Sube un .zip con el proyecto.</p>
+      <input id="zip-file" type="file" accept=".zip" style="margin-bottom:8px">
+      <div id="zip-msg" style="font-size:12px;color:var(--muted)"></div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeModal()">Cancelar</button>
+        <button class="btn primary" onclick="confirmZip()"><i class="fa fa-file-zipper"></i> Subir y agregar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -419,10 +448,25 @@ async function fetchAPI(method, endpoint, body) {
     const opts = { method, headers: {'Content-Type':'application/json'} };
     if (body) opts.body = JSON.stringify(body);
     const r = await fetch(endpoint, opts);
+    if (r.status === 401) { window.location = '/login'; return { error: 'No autenticado' }; }
     return r.json();
   } catch(e) {
     return { error: e.message };
   }
+}
+
+// ── Modo del manager (docker / portable) ───────────────────────────────────
+async function loadManagerBadge() {
+  const el = document.getElementById('mode-badge');
+  if (!el) return;
+  const m = await fetchAPI('GET', '/api/manager');
+  if (!m || m.error || !m.mode) return;
+  const portable = m.mode === 'portable';
+  el.textContent = portable ? 'Portable' : 'Docker';
+  el.title = portable
+    ? 'Sin Docker: las BD corren como procesos con binarios descargables'
+    : 'Docker disponible: las BD corren en contenedores';
+  el.style.color = portable ? 'var(--starting)' : 'var(--accent)';
 }
 
 function toast(msg, type = 'error', dur = 4000) {
@@ -615,6 +659,7 @@ function renderInfo(p) {
       <button class="btn primary" onclick="projectAction('${esc(p.name)}','up')"><i class="fa fa-play"></i> Up</button>
       <button class="btn"         onclick="projectAction('${esc(p.name)}','down')"><i class="fa fa-stop"></i> Down</button>
       <button class="btn"         onclick="projectAction('${esc(p.name)}','restart')"><i class="fa fa-rotate-right"></i> Restart</button>
+      <button class="btn"         onclick="refreshProject('${esc(p.name)}')" title="git pull"><i class="fa fa-download"></i> Actualizar</button>
       <div style="flex:1"></div>
       <button class="btn danger"  onclick="removeProject('${esc(p.name)}')"><i class="fa fa-trash"></i> Remove</button>
     </div>`;
@@ -740,9 +785,17 @@ async function projectAction(name, action) {
 }
 
 async function removeProject(name) {
-  if (!confirm(`Eliminar '${name}' del gestor?\n(Los archivos del proyecto no se borran)`)) return;
+  if (!confirm(`Eliminar '${name}' del gestor?\n(Si fue clonado por Git/ZIP, se borra su copia; si es una ruta tuya, no se toca)`)) return;
   await fetchAPI('DELETE', `/api/projects/${name}`);
   if (state.selected === name) backToList();
+  await loadProjects();
+}
+
+async function refreshProject(name) {
+  toast('Actualizando…', 'ok', 1500);
+  const data = await fetchAPI('POST', `/api/projects/${name}/refresh`);
+  if (data.error) toast(data.error, 'error');
+  else toast('Proyecto actualizado', 'ok', 2500);
   await loadProjects();
 }
 
@@ -765,9 +818,52 @@ function openModal() {
   document.getElementById('modal-path').value = '';
   document.getElementById('preview-box').style.display = 'none';
   document.getElementById('btn-confirm').disabled = true;
+  document.getElementById('git-url').value = '';
+  document.getElementById('git-ref').value = '';
+  document.getElementById('git-msg').textContent = '';
+  document.getElementById('zip-file').value = '';
+  document.getElementById('zip-msg').textContent = '';
   _detectedProject = null;
+  addTab('git');
 }
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function addTab(which) {
+  ['local','git','zip'].forEach(t => {
+    document.getElementById('add-' + t).style.display = (t === which) ? 'block' : 'none';
+    const b = document.querySelector(`.add-tab[data-tab="${t}"]`);
+    if (b) b.classList.toggle('primary', t === which);
+  });
+}
+
+async function confirmGit() {
+  const url = document.getElementById('git-url').value.trim();
+  const ref = document.getElementById('git-ref').value.trim();
+  if (!url) return;
+  const msg = document.getElementById('git-msg');
+  msg.textContent = 'Clonando…';
+  const data = await fetchAPI('POST', '/api/projects/git', { url, ref: ref || undefined });
+  if (data.error) { msg.textContent = ''; toast(data.error); return; }
+  closeModal();
+  await loadProjects();
+}
+
+async function confirmZip() {
+  const f = document.getElementById('zip-file').files[0];
+  if (!f) return;
+  const msg = document.getElementById('zip-msg');
+  msg.textContent = 'Subiendo…';
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch('/api/projects/zip', { method: 'POST', body: fd });
+    if (r.status === 401) { window.location = '/login'; return; }
+    const data = await r.json();
+    if (data.error) { msg.textContent = ''; toast(data.error); return; }
+    closeModal();
+    await loadProjects();
+  } catch (e) { msg.textContent = ''; toast(e.message); }
+}
 
 async function detectProject() {
   const path = document.getElementById('modal-path').value.trim();
@@ -843,6 +939,7 @@ setInterval(async () => {
 }, 5000);
 
 loadProjects();
+loadManagerBadge();
 </script>
 </body>
 </html>

@@ -9,10 +9,19 @@ import subprocess
 import time
 from pathlib import Path
 
+from core.paths import data_root
+
 # Archivo JSON que NativeManager escribe en la carpeta del proyecto con la config de BD
 _NATIVE_CONFIG_FILE = ".orq_native.json"
-# Directorio donde se guardan los datos de BD (pgdata, datos de MySQL, etc.)
-_DATA_BASE = os.path.expanduser("~/.orquestador/native")
+
+
+def _data_base() -> str:
+    # Directorio donde se guardan los datos de BD (pgdata, datos de MySQL, etc.).
+    # Se resuelve en cada llamada (no a nivel de módulo) para respetar ORQ_DATA_DIR
+    # aunque se setee después de importar.
+    path = os.path.join(data_root(), "native")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 # Puerto estándar de cada BD dentro del proceso nativo
 _CONTAINER_PORTS = {
@@ -230,7 +239,7 @@ class NativeManager:
     def _data_dir(self, project_path: str, db_type: str) -> str:
         # Directorio donde se almacenan los datos de la BD (ej. ~/.orquestador/native/miapp/postgresql)
         project_name = Path(project_path).name
-        path = os.path.join(_DATA_BASE, project_name, db_type)
+        path = os.path.join(_data_base(), project_name, db_type)
         os.makedirs(path, exist_ok=True)
         return path
 

@@ -1,0 +1,7 @@
+# Nixpacks: asegurar git en la imagen (add_project_from_git usa `git clone`).
+# Los binarios de BD portables se descargan en runtime a ORQ_DATA_DIR, no aquí.
+[phases.setup]
+nixPkgs = ["python312", "gcc", "git"]
+
+[start]
+cmd = "gunicorn api.server:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120"

@@ -1,6 +1,11 @@
 import os
+import re
 import json
+import stat
+import shutil
 import sqlite3
+import zipfile
+import tempfile
 import threading
 import subprocess
 from datetime import datetime
@@ -10,6 +15,19 @@ from core.detector import DatabaseDetector
 from core.connector import DBConnection
 from core.port_manager import PortManager
 from core.manager_factory import get_manager
+from core.paths import projects_dir
+
+
+def _rmtree(path: str):
+    """rmtree que además quita el bit de solo-lectura (Windows: los objetos de
+    .git son read-only y hacen fallar shutil.rmtree normal)."""
+    def _onerror(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:
+            pass
+    shutil.rmtree(path, onerror=_onerror)
 
 # Puerto estándar de cada motor de BD dentro del contenedor Docker
 _DB_CONTAINER_PORTS = {
@@ -98,9 +116,112 @@ class Gestor:
         path = os.path.abspath(os.path.expanduser(path))
         if not os.path.isdir(path):
             return {"ok": False, "error": f"Carpeta no encontrada: {path}"}
+        return self._register(path)
 
-        # El nombre del proyecto es el nombre de la carpeta
-        name = Path(path).name
+    # ── Alta desde Git / ZIP (para uso en web, sin ruta de disco local) ───────
+
+    @staticmethod
+    def _slug(text: str) -> str:
+        s = re.sub(r"[^a-zA-Z0-9._-]+", "-", text.strip()).strip("-.")
+        return s or "proyecto"
+
+    def add_project_from_git(self, url: str, ref: str | None = None) -> dict:
+        """Clona un repo en <data>/projects/<name> y lo registra."""
+        raw  = url.rstrip("/").rsplit("/", 1)[-1]
+        name = self._slug(raw[:-4] if raw.endswith(".git") else raw)
+
+        con = self._con()
+        existing = con.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
+        con.close()
+        if existing:
+            return {"ok": False, "error": f"El proyecto '{name}' ya existe"}
+
+        dest = os.path.join(projects_dir(), name)
+        if os.path.exists(dest):
+            _rmtree(dest)
+
+        cmd = ["git", "clone", "--depth", "1"]
+        if ref:
+            cmd += ["--branch", ref]
+        cmd += [url, dest]
+        try:
+            r = subprocess.run(cmd, capture_output=True, encoding="utf-8",
+                               errors="replace", timeout=300)
+        except FileNotFoundError:
+            return {"ok": False, "error": "git no está instalado"}
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "git clone tardó demasiado"}
+        if r.returncode != 0:
+            _rmtree(dest)
+            return {"ok": False, "error": f"git clone falló: {(r.stderr or r.stdout or '').strip()[:400]}"}
+
+        return self._register(dest, name=name, source={"kind": "git", "url": url, "ref": ref})
+
+    def add_project_from_zip(self, file_storage) -> dict:
+        """Extrae un .zip subido a <data>/projects/<name> y lo registra."""
+        base = self._slug(Path(file_storage.filename).stem)
+
+        con = self._con()
+        existing = con.execute("SELECT id FROM projects WHERE name = ?", (base,)).fetchone()
+        con.close()
+        if existing:
+            return {"ok": False, "error": f"El proyecto '{base}' ya existe"}
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        try:
+            file_storage.save(tmp.name)
+            tmp.close()
+            if not zipfile.is_zipfile(tmp.name):
+                return {"ok": False, "error": "El archivo no es un .zip válido"}
+
+            dest = os.path.join(projects_dir(), base)
+            if os.path.exists(dest):
+                _rmtree(dest)
+            with zipfile.ZipFile(tmp.name) as z:
+                z.extractall(dest)
+
+            # Si el zip trae todo dentro de una única carpeta raíz, usar esa como root
+            entries = [e for e in os.listdir(dest) if not e.startswith("__MACOSX")]
+            if len(entries) == 1 and os.path.isdir(os.path.join(dest, entries[0])):
+                dest = os.path.join(dest, entries[0])
+
+            return self._register(dest, name=base, source={"kind": "zip"})
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+
+    def refresh_project(self, name: str) -> dict:
+        """git pull sobre un proyecto registrado por Git."""
+        row = self._get_row(name)
+        if not row:
+            return {"ok": False, "error": f"Proyecto '{name}' no encontrado"}
+        path = row["path"]
+        if not os.path.isdir(os.path.join(path, ".git")):
+            return {"ok": False, "error": "El proyecto no es un repositorio Git"}
+        try:
+            r = subprocess.run(["git", "-C", path, "pull", "--ff-only"],
+                               capture_output=True, encoding="utf-8",
+                               errors="replace", timeout=180)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "git pull tardó demasiado"}
+        if r.returncode != 0:
+            return {"ok": False, "error": f"git pull falló: {(r.stderr or r.stdout or '').strip()[:400]}"}
+
+        # Re-detectar por si cambió la BD / forma de arrancar
+        detection = DatabaseDetector(path).detect()
+        con = self._con()
+        con.execute("UPDATE projects SET detection = ?, updated_at = ? WHERE name = ?",
+                    (json.dumps(detection), self._now(), name))
+        con.commit()
+        con.close()
+        return {"ok": True, "output": (r.stdout or "").strip()}
+
+    def _register(self, path: str, name: str | None = None,
+                  source: dict | None = None) -> dict:
+        # El nombre del proyecto es el nombre de la carpeta (salvo override de git/zip)
+        name = name or Path(path).name
 
         con = self._con()
         existing = con.execute("SELECT id FROM projects WHERE name = ?", (name,)).fetchone()
@@ -295,6 +416,19 @@ class Gestor:
             self._connections.pop(name, None)
             self._procs.pop(name, None)
             self._logs.pop(name, None)
+
+        # Si el proyecto fue clonado/extraído por nosotros (vive bajo projects_dir),
+        # borrar la copia en disco. Los proyectos con ruta propia del usuario no se tocan.
+        try:
+            proot = os.path.abspath(projects_dir())
+            ppath = os.path.abspath(row.get("path", ""))
+            if ppath == proot or ppath.startswith(proot + os.sep):
+                # subir hasta el hijo directo de projects_dir antes de borrar
+                rel = os.path.relpath(ppath, proot).split(os.sep)[0]
+                if rel and rel not in (".", ".."):
+                    _rmtree(os.path.join(proot, rel))
+        except Exception:
+            pass
 
         return {"ok": True}
 
