@@ -81,6 +81,42 @@ _DB_CONTAINER_PORTS = {
     "redis":      6379,
 }
 
+# Nombre de imagen Docker típico de cada BD, usado para encontrar el servicio
+# correcto dentro de un compose.yml que bundlea BD + app (ej. microservicios
+# Spring Boot: postgres-admision + lamb-admision-ms en el mismo archivo).
+_DB_IMAGE_NAMES = {
+    "postgresql": "postgres",
+    "mysql":      "mysql",
+    "mariadb":    "mariadb",
+    "mongodb":    "mongo",
+    "redis":      "redis",
+}
+
+
+def _find_db_service_name(compose_file: str, db_type: str) -> "str | None":
+    """Busca, dentro de un compose.yml, el nombre del servicio cuya imagen
+    corresponde a `db_type` (ej. "postgres-admision" para postgres:16-alpine).
+    Permite levantar SOLO ese servicio con `docker compose up -d <servicio>`
+    cuando el compose también define el contenedor de la app (build: .) y
+    esta se va a arrancar en nativo (mvnw, npm run dev, etc.) en vez de Docker."""
+    image_name = _DB_IMAGE_NAMES.get(db_type)
+    if not image_name:
+        return None
+    try:
+        with open(compose_file, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except Exception:
+        return None
+    services_block = re.search(r'^services:\s*\n((?:(?:[ \t]+.*)?\n)+)', content, re.MULTILINE)
+    if not services_block:
+        return None
+    block = services_block.group(1)
+    for m in re.finditer(r'^[ \t]{2}(\S+):\s*\n((?:(?:[ \t]{3,}.*)?\n)*)', block, re.MULTILINE):
+        svc_name, svc_body = m.group(1), m.group(2)
+        if re.search(rf'image:\s*["\']?{image_name}', svc_body, re.IGNORECASE):
+            return svc_name
+    return None
+
 # Variables de entorno que cada BD usa para user/password/database en docker-compose
 _DB_ENV_FIELDS = {
     "postgresql": {"user": ["POSTGRES_USER"], "password": ["POSTGRES_PASSWORD"], "database": ["POSTGRES_DB"]},
@@ -168,6 +204,45 @@ def _get_compose_running_ports(compose_file: str) -> dict:
         return {}
 
 
+def _load_dotenv(env_dir: str) -> dict:
+    """Lee un .env simple (KEY=VALUE por línea) junto al compose.yml, si existe.
+    Docker Compose lo carga solo al hacer `docker compose up` (interpola
+    ${VAR} en el YAML); nosotros necesitamos los mismos valores para poder
+    resolver esos placeholders cuando los leemos nosotros mismos por regex."""
+    values = {}
+    path = os.path.join(env_dir, ".env")
+    if not os.path.isfile(path):
+        return values
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                values[k.strip()] = v.strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return values
+
+
+def _resolve_placeholder(value: str, env_dir: str) -> str:
+    """Si `value` es un placeholder de compose (`${VAR}` o `${VAR:-default}`),
+    lo resuelve contra el entorno del SO y el .env del proyecto — igual que
+    `docker compose` lo haría al interpolar el YAML. Si no es un placeholder,
+    o no se puede resolver, devuelve `value` tal cual."""
+    m = re.fullmatch(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(:-(.*))?\}', value)
+    if not m:
+        return value
+    var_name, _, default = m.groups()
+    if var_name in os.environ:
+        return os.environ[var_name]
+    dotenv = _load_dotenv(env_dir)
+    if var_name in dotenv:
+        return dotenv[var_name]
+    return default if default is not None else value
+
+
 def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
     """
     Parsea un docker-compose.yml con regex para extraer host_port, user, password, database.
@@ -178,6 +253,7 @@ def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
             content = f.read()
     except Exception:
         return {}
+    env_dir = os.path.dirname(compose_file)
     container_port = _DB_CONTAINER_PORTS.get(db_type)
     info = {}
     if container_port:
@@ -191,7 +267,7 @@ def _extract_compose_db_info(compose_file: str, db_type: str) -> dict:
         for var in env_vars:
             m = re.search(rf'{var}\s*[=:]\s*["\']?([^"\'\s\n]+)["\']?', content)
             if m:
-                info[field] = m.group(1)
+                info[field] = _resolve_placeholder(m.group(1), env_dir)
                 break
     return info
 
@@ -204,6 +280,9 @@ class DockerManager:
 
     def is_docker_available(self) -> bool:
         return shutil.which("docker") is not None
+
+    def find_db_service_name(self, compose_file: str, db_type: str) -> "str | None":
+        return _find_db_service_name(compose_file, db_type)
 
     def create_network(self, project_name: str) -> bool:
         # Red Docker aislada por proyecto (orq_<nombre>_net)
@@ -223,7 +302,29 @@ class DockerManager:
         )
         return r.returncode == 0
 
-    def up(self, project_path: str, network_name: str, port_mapping: dict) -> dict:
+    def _ensure_external_networks(self, compose_content: str) -> None:
+        # compose declara `networks: <nombre>: external: true` cuando espera
+        # que esa red ya exista (compartida entre varios compose, p.ej.
+        # kafka/obs que cuelgan de la misma lamb-prod-net). Si nadie la creó
+        # todavía, `docker compose up` falla con "declared as external, but
+        # could not be found" — la creamos nosotros, idempotente.
+        try:
+            networks_block = re.search(r'^networks:\s*\n((?:[ \t]+.+\n?)+)', compose_content, re.MULTILINE)
+            if not networks_block:
+                return
+            block = networks_block.group(1)
+            for m in re.finditer(r'^[ \t]{1,2}(\S+):\s*\n((?:[ \t]{3,}.+\n?)*)', block, re.MULTILINE):
+                net_name, net_body = m.group(1), m.group(2)
+                if re.search(r'external:\s*true', net_body):
+                    subprocess.run(
+                        ["docker", "network", "create", net_name],
+                        capture_output=True, encoding="utf-8", errors="replace"
+                    )
+        except Exception:
+            pass
+
+    def up(self, project_path: str, network_name: str, port_mapping: dict,
+           only_service: "str | None" = None) -> dict:
         if not self.is_docker_available():
             return {"ok": False, "error": f"{'docker'} no está instalado"}
 
@@ -257,8 +358,15 @@ class DockerManager:
                 return {"ok": False, "error": f"Error al analizar docker-compose.yml: {e}"}
 
         try:
+            with open(compose_file, encoding="utf-8", errors="replace") as f:
+                self._ensure_external_networks(f.read())
+
+            up_cmd = ["docker", "compose", "-f", compose_file, "up", "-d"]
+            if only_service:
+                up_cmd.append(only_service)
+
             result = subprocess.run(
-                ["docker", "compose", "-f", compose_file, "up", "-d"],
+                up_cmd,
                 capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                 cwd=os.path.dirname(compose_file)
             )
@@ -273,7 +381,7 @@ class DockerManager:
                     cwd=os.path.dirname(compose_file)
                 )
                 result = subprocess.run(
-                    ["docker", "compose", "-f", compose_file, "up", "-d"],
+                    up_cmd,
                     capture_output=True, encoding="utf-8", errors="replace", timeout=120,
                     cwd=os.path.dirname(compose_file)
                 )

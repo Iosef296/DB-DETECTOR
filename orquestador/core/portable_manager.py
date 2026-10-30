@@ -23,6 +23,7 @@ import shutil
 import platform
 import tarfile
 import zipfile
+import subprocess
 import urllib.request
 
 from core.native_manager import NativeManager
@@ -176,6 +177,25 @@ _CATALOG: dict[str, dict[str, dict]] = {
             },
         },
     },
+    "windows": {
+        "x86_64": {
+            # Igual que linux/darwin (mismo JAR zonky, mismo .txz adentro), pero el
+            # árbol extraído trae .exe y los .dll de runtime ya están junto a cada
+            # binario en bin/ (Windows busca DLLs en el directorio del .exe por
+            # defecto) → no hace falta lib_path/PATH extra como con .so en Linux.
+            "postgresql": {
+                "url": f"https://repo1.maven.org/maven2/io/zonky/test/postgres/"
+                       f"embedded-postgres-binaries-windows-amd64/{_PG_VERSION}/"
+                       f"embedded-postgres-binaries-windows-amd64-{_PG_VERSION}.jar",
+                "format": "zonky_jar",
+                "bin_paths": {
+                    "initdb":   "bin/initdb.exe",
+                    "pg_ctl":   "bin/pg_ctl.exe",
+                    "postgres": "bin/postgres.exe",
+                },
+            },
+        },
+    },
 }
 
 
@@ -191,6 +211,27 @@ def _download(url: str, dest: str, on_progress=None):
             on_progress(min(block * block_size, total), total)
 
     urllib.request.urlretrieve(url, dest, _hook)
+
+
+def _grant_user_access(path: str):
+    """Si el server corre elevado (admin), lo extraído puede terminar con un
+    ACL que solo incluye SYSTEM + Administradores — nos pasó de verdad: ningún
+    proceso no-elevado (ni, aparentemente, el propio postgres.exe hijo) podía
+    leer share/timezone, y Postgres lo reportaba como "No existe el archivo o
+    el directorio" en vez de un error de permisos claro. Garantizamos acceso
+    de lectura/ejecución para cualquier usuario autenticado, recursivo.
+    *S-1-5-11 = "Authenticated Users" por SID — evita problemas de idioma
+    (Windows en español usa "Usuarios autentificados", etc.).
+    """
+    if platform.system() != "Windows":
+        return
+    try:
+        subprocess.run(
+            ["icacls", path, "/grant", "*S-1-5-11:(OI)(CI)RX", "/T", "/C", "/Q"],
+            capture_output=True, timeout=30
+        )
+    except Exception:
+        pass
 
 
 def _mark_executable(path: str):
@@ -315,31 +356,54 @@ class PortableManager(NativeManager):
             system, machine = _platform()
             return {"ok": False, "error": f"No hay binarios portables para {db_type} en {system}/{machine}"}
 
-        # Solo verificamos el PRIMER binario del catálogo como señal de que la descarga
-        # fue completa. Si solo ese archivo existe, asumimos que el resto también está
-        # (fueron extraídos del mismo archive en una sola operación atómica).
-        first_rel = next(iter(release["bin_paths"].values()))
-        first_bin = os.path.join(self._bin_dir(db_type), first_rel)
-        if os.path.isfile(first_bin) and os.access(first_bin, os.X_OK):
+        bin_dir = self._bin_dir(db_type)
+
+        # Verificamos TODOS los binarios del catálogo, no solo el primero — un
+        # solo binario presente no garantiza que el resto (incluido share/,
+        # que Postgres necesita en runtime para timezones) también esté.
+        def _looks_complete(d: str) -> bool:
+            return all(
+                os.path.isfile(p := os.path.join(d, rel)) and os.access(p, os.X_OK)
+                for rel in release["bin_paths"].values()
+            )
+
+        if _looks_complete(bin_dir):
             return {"ok": True, "cached": True}
 
-        url     = release["url"]
-        fmt     = release.get("format", "tar")
-        fname   = url.rsplit("/", 1)[-1]
-        archive = os.path.join(self._bin_dir(db_type), fname)
+        url   = release["url"]
+        fmt   = release.get("format", "tar")
+        fname = url.rsplit("/", 1)[-1]
+
+        # Extracción atómica: a un directorio temporal nuevo, nunca directo al
+        # destino final. Si una extracción se corta a la mitad (o el destino
+        # final ya tenía restos rotos de un intento viejo — nos pasó con
+        # permisos corruptos en share/), el chequeo de arriba nunca la vuelve
+        # a confundir con "ya descargado": el temp dir se descarta entero y el
+        # final nunca se tocó hasta que todo salió bien.
+        tmp_dir = f"{bin_dir}.tmp-{os.getpid()}"
+        if os.path.isdir(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        os.makedirs(tmp_dir, exist_ok=True)
+        archive = os.path.join(tmp_dir, fname)
 
         try:
             _download(url, archive, on_progress)
-            _extract(archive, self._bin_dir(db_type), fmt)
-            # Borramos el archive descargado después de extraer para recuperar espacio:
-            # PostgreSQL portable pesa ~80 MB comprimido, MySQL ~200 MB.
-            # Los binarios extraídos ya son suficientes para arrancar la BD.
+            _extract(archive, tmp_dir, fmt)
             try:
                 os.remove(archive)
             except Exception:
                 pass
+
+            if not _looks_complete(tmp_dir):
+                raise RuntimeError("extracción incompleta: faltan binarios esperados")
+
+            if os.path.isdir(bin_dir):
+                shutil.rmtree(bin_dir, ignore_errors=True)
+            os.replace(tmp_dir, bin_dir)
+            _grant_user_access(bin_dir)
             return {"ok": True, "cached": False}
         except Exception as e:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             return {"ok": False, "error": f"Descarga fallida para {db_type}: {e}"}
 
     def available_dbs(self) -> list[str]:
@@ -362,7 +426,8 @@ class PortableManager(NativeManager):
 
     # ── Override de up(): auto-descargar antes de iniciar ────────────────────
 
-    def up(self, project_path: str, network_name: str, port_mapping: dict) -> dict:
+    def up(self, project_path: str, network_name: str, port_mapping: dict,
+           only_service: str | None = None) -> dict:
         config = self._load_config(project_path)
         if not config:
             # El proyecto puede tener un docker-compose.yml original (del desarrollador)
@@ -384,7 +449,23 @@ class PortableManager(NativeManager):
             # en cada up(). Si los binarios ya existen, retorna inmediatamente {"ok": True, "cached": True}.
             # Si falla la descarga (sin internet, URL caída), propagamos el error aquí
             # antes de intentar arrancar un proceso que definitivamente va a fallar.
-            result = self.ensure_db(db_type)
+            logger = getattr(self, "_progress_logger", None)
+            on_progress = None
+            if logger:
+                # urlretrieve llama al hook por cada bloque (miles de veces para
+                # un archive de 80MB) — logueamos solo cada 10% para no inundar
+                # el panel de logs del proyecto.
+                state = {"last_pct": -10}
+
+                def on_progress(done, total):
+                    pct = int(done * 100 / total) if total else 0
+                    if pct >= state["last_pct"] + 10 or pct == 100:
+                        state["last_pct"] = pct
+                        mb_done  = done // (1024 * 1024)
+                        mb_total = total // (1024 * 1024)
+                        logger(f"[orquestador] Descargando {db_type} portable: {pct}% ({mb_done}MB / {mb_total}MB)")
+
+            result = self.ensure_db(db_type, on_progress=on_progress)
             if not result.get("ok"):
                 return result
 
@@ -392,4 +473,4 @@ class PortableManager(NativeManager):
         # PortableManager no reimplementa el arranque: solo añade la capa de descarga.
         # NativeManager._bin() será sobrescrito por nuestro _bin() de arriba, así que
         # usará los binarios portables que acabamos de asegurar.
-        return super().up(project_path, network_name, port_mapping)
+        return super().up(project_path, network_name, port_mapping, only_service=only_service)

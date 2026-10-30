@@ -7,9 +7,49 @@ import platform
 import threading
 import webbrowser
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 _IS_WINDOWS = platform.system() == "Windows"
+
+# Ventana nativa de pywebview (seteada por desktop.py al arrancar como app de
+# escritorio). Si existe, /api/pick-folder la usa en vez de tkinter: pywebview
+# marshala la llamada al hilo de GUI correcto por dentro, evitando el
+# "RuntimeError: main thread is not in main loop" que da tkinter al crear un
+# Tk() desde el hilo de Flask (que no es el hilo principal del proceso).
+_desktop_window = None
+
+
+def set_desktop_window(window) -> None:
+    global _desktop_window
+    _desktop_window = window
+
+if _IS_WINDOWS:
+    # Corriendo como app de ventana (desktop.py / el .exe empaquetado) no hay
+    # consola propia a la que heredar — cada subprocess.run/Popen (netstat,
+    # taskkill, maven, postgres, docker...) que no diga lo contrario le abre
+    # su PROPIA consola nueva y la flashea en pantalla. Parcheamos Popen acá,
+    # una sola vez, para que todo el código (orchestrator.py, native_manager,
+    # docker_manager, etc.) quede cubierto sin tocar cada call site.
+    _orig_popen_init = subprocess.Popen.__init__
+
+    def _popen_no_window(self, *args, **kwargs):
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | subprocess.CREATE_NO_WINDOW
+        _orig_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _popen_no_window
+
+    # Consola Windows (cp1252) no soporta box-drawing chars (─, etc.) que
+    # usamos en los prints de arranque — forzamos UTF-8 para evitar
+    # UnicodeEncodeError y que el server muera al iniciar. Bajo pythonw.exe
+    # (sin consola) sys.stdout/stderr son None, reconfigure() tira
+    # AttributeError — por eso el try/except.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 from flask import (
     Flask, request, jsonify, send_from_directory, Response, session, redirect
@@ -23,8 +63,79 @@ from core.detector import DatabaseDetector
 from core.connector import DBConnection
 from core.paths import data_root
 from core.manager_factory import get_manager_name
+from core.mem_tools import free_ram as _free_ram, list_db_processes as _list_db_processes
 
 _ROOT = Path(__file__).parent.parent
+
+# ── Logging a archivo ─────────────────────────────────────────────────────────
+# Necesario para correr con pythonw.exe (sin consola: sys.stdout/stderr son
+# None) y para poder diagnosticar una caída sin depender de una ventana de
+# PowerShell que se puede cerrar sin querer y se lleva los logs con ella.
+import datetime as _dt
+
+_log_dir = os.path.join(data_root(), "logs")
+os.makedirs(_log_dir, exist_ok=True)
+_log_path = os.path.join(_log_dir, "server.log")
+try:
+    if os.path.isfile(_log_path) and os.path.getsize(_log_path) > 5 * 1024 * 1024:
+        os.replace(_log_path, _log_path + ".old")
+except Exception:
+    pass
+_log_file = open(_log_path, "a", encoding="utf-8", buffering=1)
+_log_file.write(f"\n===== arranque {_dt.datetime.now().isoformat()} (PID {os.getpid()}) =====\n")
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = [s for s in streams if s is not None]
+
+    def write(self, data):
+        for s in self.streams:
+            try:
+                s.write(data)
+            except Exception:
+                pass
+
+    def flush(self):
+        for s in self.streams:
+            try:
+                s.flush()
+            except Exception:
+                pass
+
+
+sys.stdout = _Tee(sys.stdout, _log_file)
+sys.stderr = _Tee(sys.stderr, _log_file)
+
+
+# ── Instancia única ────────────────────────────────────────────────────────────
+# Windows permite bindear el mismo puerto desde varios procesos sin error
+# (SO_REUSEADDR laxo) — eso nos dejó 3 servers zombie corriendo código viejo
+# el mismo día, sirviendo siempre el más antiguo sin aviso. Antes de levantar,
+# chequeamos quién tiene el puerto realmente escuchando (vía netstat) y si es
+# otro proceso vivo, no arrancamos un segundo encima.
+def _port_owner_pid(port: int) -> int | None:
+    if not _IS_WINDOWS:
+        return None
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=10
+        ).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[0] == "TCP" and parts[-2] == "LISTENING":
+                if parts[1].rsplit(":", 1)[-1] == str(port):
+                    return int(parts[-1])
+    except Exception:
+        pass
+    return None
+
+
+def _ensure_single_instance(port: int):
+    pid = _port_owner_pid(port)
+    if pid and pid != os.getpid():
+        print(f"Ya hay un server escuchando en el puerto {port} (PID {pid}) — cierro este arranque duplicado.")
+        sys.exit(0)
 
 # ── Ruta del SQLite del registro ─────────────────────────────────────────────
 # - Si ORQ_DATA_DIR está seteado (Railway/contenedor) → <ORQ_DATA_DIR>/projects.db
@@ -111,6 +222,22 @@ def healthz():
     return jsonify({"ok": True})
 
 
+@app.route("/api/system/free-ram", methods=["POST"])
+def api_system_free_ram():
+    result = _free_ram()
+    if not result.get("ok"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/api/system/processes")
+def api_system_processes():
+    result = _list_db_processes()
+    if not result.get("ok"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
 @app.route("/api/manager")
 def api_manager():
     mode = get_manager_name()
@@ -152,6 +279,32 @@ def api_projects_add():
     return jsonify(result), 201
 
 
+@app.route("/api/pick-folder", methods=["POST"])
+def api_pick_folder():
+    # Diálogo nativo de carpeta del sistema operativo — tiene sentido acá porque
+    # el gestor corre en la máquina del propio usuario (uso de escritorio local),
+    # así que "examinar" puede abrir una ventana real en vez de depender de que
+    # el navegador exponga rutas absolutas del filesystem (cosa que no hace por
+    # privacidad: un <input type=file webkitdirectory> no entrega la ruta real).
+    try:
+        if _desktop_window is not None:
+            import webview
+            result = _desktop_window.create_file_dialog(webview.FOLDER_DIALOG)
+            path = result[0] if result else None
+            return jsonify({"ok": True, "path": path})
+
+        import tkinter
+        from tkinter import filedialog
+        root = tkinter.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        path = filedialog.askdirectory(title="Elegir carpeta")
+        root.destroy()
+        return jsonify({"ok": True, "path": path or None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
 @app.route("/api/projects/scan-folder", methods=["POST"])
 def api_projects_scan_folder():
     data = request.json or {}
@@ -169,9 +322,10 @@ def api_projects_git():
     data = request.json or {}
     url = (data.get("url") or "").strip()
     ref = (data.get("ref") or "").strip() or None
+    dest_folder = (data.get("dest_folder") or "").strip() or None
     if not url:
         return jsonify({"error": "Proporciona la URL del repositorio"}), 400
-    result = gestor.add_project_from_git(url, ref)
+    result = gestor.add_project_from_git(url, ref, dest_folder)
     if not result.get("ok"):
         return jsonify({"error": result.get("error")}), 400
     return jsonify(result), 201
@@ -217,12 +371,69 @@ def api_projects_remove(name):
     return jsonify({"ok": True})
 
 
+@app.route("/api/groups/<group>", methods=["DELETE"])
+def api_group_remove(group):
+    result = gestor.remove_group(group)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result)
+
+
+@app.route("/api/root-groups/<root_group>", methods=["DELETE"])
+def api_root_group_remove(root_group):
+    result = gestor.remove_root_group(root_group)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result)
+
+
+@app.route("/api/projects/<name>/ram-limit", methods=["PUT"])
+def api_project_ram_limit(name):
+    data = request.json or {}
+    mb = data.get("mb")
+    result = gestor.set_ram_limit(name, int(mb) if mb else None)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result)
+
+
+@app.route("/api/groups/<group>/ram-limit", methods=["PUT"])
+def api_group_ram_limit(group):
+    data = request.json or {}
+    mb = data.get("mb")
+    result = gestor.set_group_ram_limit(group, int(mb) if mb else None)
+    if not result.get("ok"):
+        return jsonify({"error": result.get("error")}), 400
+    return jsonify(result)
+
+
 @app.route("/api/projects/<name>/up", methods=["POST"])
 def api_projects_up(name):
     result = gestor.up(name)
     if not result.get("ok"):
-        return jsonify({"error": result.get("error")}), 400
+        return jsonify(result), 400
     return jsonify(result)
+
+
+@app.route("/api/system/kill-pid/<int:pid>", methods=["POST"])
+def api_system_kill_pid(pid):
+    # Para liberar un puerto ocupado por un proceso que NO es uno de nuestros
+    # proyectos (si lo fuera, se baja con /api/projects/<name>/down, que es
+    # más seguro porque sabe qué proceso es). Esto es un kill genérico por PID,
+    # así que lo usamos solo cuando el propio chequeo de puerto (ver
+    # Gestor._port_owner) ya identificó ese PID como el dueño del puerto.
+    try:
+        if _IS_WINDOWS:
+            r = subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+        else:
+            r = subprocess.run(["kill", "-9", str(pid)],
+                                capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+        if r.returncode != 0:
+            return jsonify({"ok": False, "error": (r.stderr or r.stdout or "").strip()}), 400
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
 
 
 @app.route("/api/projects/<name>/down", methods=["POST"])
@@ -284,6 +495,35 @@ def api_projects_export(name):
         mimetype=mime,
         headers={"Content-Disposition": f'attachment; filename="{result["filename"]}"'}
     )
+
+
+@app.route("/api/groups", methods=["GET"])
+def api_groups_list():
+    return jsonify(gestor.list_groups())
+
+
+@app.route("/api/groups/<group>/up", methods=["POST"])
+def api_group_up(group):
+    result = gestor.start_group(group)
+    if not result.get("ok"):
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/api/groups/<group>/down", methods=["POST"])
+def api_group_down(group):
+    result = gestor.stop_group(group)
+    if not result.get("ok") and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+
+@app.route("/api/groups/<group>/restart", methods=["POST"])
+def api_group_restart(group):
+    result = gestor.restart_group(group)
+    if not result.get("ok") and "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 @app.route("/api/projects/up-all", methods=["POST"])
@@ -758,6 +998,86 @@ def api_install_server():
     return jsonify({"ok": True, "credentials": {**cfg["default_creds"], "type": db_type}})
 
 
+# ── Proxy inverso: expone la app de un proyecto bajo /proxy/<name>/ ───────────
+# Railway solo expone un puerto público (el del Gestor), así que para ver la
+# app de un proyecto (que corre en un puerto interno, 127.0.0.1:<app_port>)
+# hace falta reenviar las requests desde acá. Mismo mecanismo funciona local.
+
+_HOP_BY_HOP_HEADERS = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade", "host", "content-length",
+}
+
+
+@app.route("/proxy/<name>/", defaults={"subpath": ""}, methods=[
+    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"
+])
+@app.route("/proxy/<name>/<path:subpath>", methods=[
+    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"
+])
+def proxy_app(name, subpath):
+    row = gestor.status(name)
+    if not row:
+        return jsonify({"error": f"Proyecto '{name}' no encontrado"}), 404
+    app_port = row.get("app_port")
+    if not app_port or row.get("status") != "RUNNING":
+        return jsonify({"error": f"Proyecto '{name}' no está corriendo"}), 400
+
+    target_url = f"http://127.0.0.1:{app_port}/{subpath}"
+    qs = request.query_string.decode()
+    if qs:
+        target_url += f"?{qs}"
+
+    fwd_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP_HEADERS
+    }
+    # Pedimos sin compresión para poder reescribir el HTML (ver abajo) y para
+    # no tener que des-gzipear manualmente antes de devolver la respuesta.
+    fwd_headers["Accept-Encoding"] = "identity"
+
+    req = urllib.request.Request(
+        target_url,
+        data=request.get_data() or None,
+        headers=fwd_headers,
+        method=request.method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            status  = resp.status
+            headers = resp.headers
+            content = resp.read()
+    except urllib.error.HTTPError as e:
+        status  = e.code
+        headers = e.headers
+        content = e.read()
+    except Exception as e:
+        return jsonify({"error": f"No se pudo conectar a la app de '{name}': {e}"}), 502
+
+    content_type = headers.get("Content-Type", "")
+    if content_type.startswith("text/html"):
+        # Inyectar <base href> para que las rutas absolutas del HTML (/static/..,
+        # /api/..) sigan resolviendo bajo el prefijo /proxy/<name>/ en vez de
+        # pegarle a la raíz del Gestor.
+        try:
+            text = content.decode("utf-8", errors="replace")
+            base_tag = f'<base href="/proxy/{name}/">'
+            if "<head>" in text:
+                text = text.replace("<head>", f"<head>{base_tag}", 1)
+            else:
+                text = base_tag + text
+            content = text.encode("utf-8")
+        except Exception:
+            pass
+
+    excluded = {
+        "content-encoding", "transfer-encoding", "connection", "content-length",
+        "server", "date",
+    }
+    out_headers = [(k, v) for k, v in headers.items() if k.lower() not in excluded]
+    return Response(content, status=status, headers=out_headers)
+
+
 # ── Frontend routes ───────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -775,6 +1095,7 @@ def legacy():
 
 def main():
     port = int(os.environ.get("PORT", 7433))
+    _ensure_single_instance(port)
     url  = f"http://localhost:{port}"
     print(f"\n{'─'*50}")
     print(f"  GESTOR corriendo en {url}")

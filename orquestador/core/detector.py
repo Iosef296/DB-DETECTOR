@@ -55,6 +55,64 @@ COMPOSE_IMAGE_PATTERNS = {
     "sqlite":     [],
 }
 
+# ─── Infra típica de microservicios (carpetas "solo-compose", sin app propia) ─
+# rank bajo = arranca primero (zookeeper antes que kafka, por ejemplo).
+# Se usa para reconocer el nombre de la carpeta y, si no matchea por nombre,
+# la imagen dentro de su docker-compose.yml.
+INFRA_FOLDER_NAMES = {
+    "zookeeper": 0, "zk": 0,
+    "kafka": 1,
+    "keycloak": 2, "rabbitmq": 2, "rabbit": 2, "consul": 2,
+    "elasticsearch": 2, "elastic": 2, "vault": 2, "minio": 2,
+    "obs": 3, "nginx": 3, "traefik": 3, "prometheus": 3, "grafana": 3,
+    "loki": 3, "promtail": 3,
+    "zipkin": 3, "jaeger": 3, "localstack": 3,
+}
+
+INFRA_COMPOSE_IMAGES = {
+    "zookeeper": 0,
+    "cp-kafka": 1, "kafka": 1,
+    "keycloak": 2, "rabbitmq": 2, "consul": 2,
+    "elasticsearch": 2, "vault": 2, "minio": 2,
+    "nginx": 3, "traefik": 3, "prometheus": 3, "grafana": 3,
+    "promtail": 3, "loki": 3,
+    "zipkin": 3, "jaegertracing": 3, "jaeger": 3, "localstack": 3,
+}
+
+
+def detect_infra_service(path: str):
+    """Si `path` es carpeta de infra "pura" (solo docker-compose, sin código
+    de app propio) y su nombre o la imagen dentro del compose matchea infra
+    típica de microservicios (kafka, keycloak, zookeeper, rabbitmq, consul,
+    elasticsearch, etc.), devuelve {"name", "rank", "compose_file"}. None si
+    no aplica."""
+    compose_names = ("docker-compose.yml", "docker-compose.yaml",
+                      "compose.yml", "compose.yaml",
+                      "compose-dev.yml", "compose-dev.yaml")
+    compose_file = None
+    for cf in compose_names:
+        candidate = os.path.join(path, cf)
+        if os.path.isfile(candidate):
+            compose_file = candidate
+            break
+    if not compose_file:
+        return None
+
+    folder_name = os.path.basename(path.rstrip("/\\")).lower()
+    for key, rank in INFRA_FOLDER_NAMES.items():
+        if key in folder_name:
+            return {"name": folder_name, "rank": rank, "compose_file": compose_file}
+
+    content = read_file_safe(compose_file).lower()
+    best = None
+    for key, rank in INFRA_COMPOSE_IMAGES.items():
+        if re.search(rf'image:\s*\S*{re.escape(key)}', content):
+            if best is None or rank < best[1]:
+                best = (key, rank)
+    if best:
+        return {"name": best[0], "rank": best[1], "compose_file": compose_file}
+    return None
+
 # ─── Archivos de dependencias ─────────────────────────────────────────────────
 
 DEP_FILES = [
@@ -336,6 +394,80 @@ class DatabaseDetector:
                         if re.search(rf'image:\s*{img}', content, re.IGNORECASE):
                             self._add_evidence(db_type, fname, f"Imagen Docker '{img}'", weight=4)
 
+    def scan_spring_config_server(self):
+        """Microservicios Spring Cloud Config no guardan credenciales de BD en su
+        propio directorio: delegan con `spring.config.import: configserver:...` a
+        un config-repo que suele vivir en un directorio HERMANO (ej.
+        infra/<algo>-config/config-repo/<app>-<profile>.yml). find_files(self.root, ...)
+        nunca llega ahí porque está fuera del árbol del servicio — sin este escaneo,
+        el detector siempre cae a credenciales/puerto por defecto que no coinciden
+        con lo que el servicio realmente usa en runtime."""
+        app_files = find_files(self.root, [
+            "application.yml", "application.yaml", "application.properties",
+            "bootstrap.yml", "bootstrap.yaml",
+        ])
+        app_name = None
+        profile = None
+        uses_config_server = False
+        for fpath in app_files:
+            content = read_file_safe(fpath)
+            if re.search(r'configserver:', content, re.IGNORECASE):
+                uses_config_server = True
+            if not app_name:
+                m = re.search(r'application:\s*\n\s*name:\s*["\']?([^\s"\'#\n]+)', content)
+                if m:
+                    app_name = m.group(1).strip()
+            if not profile:
+                m = re.search(r'profiles:\s*\n\s*active:\s*["\']?([^\s"\'#\n]+)', content)
+                if m:
+                    profile = m.group(1).strip()
+
+        if not uses_config_server or not app_name:
+            return
+
+        # Buscar un directorio "config-repo" hermano, subiendo desde el proyecto
+        # hasta la raíz del monorepo (services/<svc> -> raíz) y, si no aparece ahí,
+        # desde el padre directo del proyecto por si la estructura es más plana.
+        search_roots = [os.path.dirname(os.path.dirname(self.root)), os.path.dirname(self.root)]
+        config_repo_dirs = []
+        for search_root in search_roots:
+            found = glob.glob(os.path.join(search_root, "**", "config-repo"), recursive=True)
+            if found:
+                config_repo_dirs = found
+                break
+        if not config_repo_dirs:
+            return
+
+        # Nombres más específicos primero: <app>-<profile>.yml pisa a application.yml
+        # genérico del config-repo, que a su vez pisa a nada.
+        names = []
+        if profile:
+            names += [f"{app_name}-{profile}.yml", f"{app_name}-{profile}.yaml"]
+        names += [f"{app_name}.yml", f"{app_name}.yaml"]
+        if profile:
+            names += [f"application-{profile}.yml", f"application-{profile}.yaml"]
+        names += ["application.yml", "application.yaml"]
+
+        for repo_dir in config_repo_dirs:
+            for name in names:
+                candidate = os.path.join(repo_dir, name)
+                if not os.path.isfile(candidate):
+                    continue
+                content = read_file_safe(candidate)
+                creds = extract_spring_datasource(content)
+                if not creds:
+                    continue
+                # El config-repo es la fuente de verdad en runtime para un
+                # servicio con configserver: — pisa cualquier valor que haya
+                # puesto scan_env_files a partir de un .env local (que puede
+                # tener user/password reales pero sin host/port, cayendo a
+                # defaults genéricos como :5432).
+                self.credentials[creds["type"]] = creds
+                fname = os.path.relpath(candidate, repo_dir)
+                self._add_evidence(creds["type"], f"config-repo/{fname}",
+                                   "Credenciales Spring Cloud Config Server", weight=6)
+                return
+
     def _scan_cloud_config(self, content: str, fname: str):
         """Parsea archivos de configuración de plataformas cloud."""
         # render.yaml / fly.toml / railway — busca claves de BD conocidas
@@ -530,6 +662,7 @@ class DatabaseDetector:
             return {"error": f"Carpeta no encontrada: {self.root}"}
 
         self.scan_env_files()
+        self.scan_spring_config_server()
         self.scan_dependency_files()
         self.scan_source_files()
 

@@ -6,10 +6,13 @@ import signal
 import socket
 import struct
 import subprocess
+import platform
 import time
 from pathlib import Path
 
 from core.paths import data_root
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 # Archivo JSON que NativeManager escribe en la carpeta del proyecto con la config de BD
 _NATIVE_CONFIG_FILE = ".orq_native.json"
@@ -43,6 +46,44 @@ _DB_ENV_FIELDS = {
 }
 
 
+def _load_dotenv(compose_file: str) -> dict:
+    """Carga el .env que docker-compose busca automáticamente junto al compose.yml
+    (mismo directorio), para poder resolver placeholders ${VAR} del compose."""
+    env_path = os.path.join(os.path.dirname(compose_file), ".env")
+    values: dict = {}
+    try:
+        with open(env_path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                values[key.strip()] = val.strip().strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return values
+
+
+def _resolve_compose_placeholder(raw: str, dotenv: dict) -> str | None:
+    """Si `raw` es un placeholder tipo ${VAR} o ${VAR:-default} (docker-compose no
+    resuelve esta interpolación por sí mismo: el propio motor de compose la resuelve
+    leyendo el .env, y como nosotros solo usamos regex sobre el YAML en lugar del CLI
+    de docker-compose, hay que resolverla a mano), lo resuelve contra el .env del
+    proyecto y si no, contra el entorno del proceso. Devuelve None si no se puede
+    resolver, para no propagar un placeholder roto (ej. literal "${DB_USER}",
+    que Postgres rechaza por el carácter '$' al crear la BD)."""
+    import re
+    m = re.fullmatch(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-(.*))?\}", raw)
+    if not m:
+        return raw  # valor literal normal, no es un placeholder
+    var_name, _, default = m.groups()
+    if var_name in dotenv:
+        return dotenv[var_name]
+    if var_name in os.environ:
+        return os.environ[var_name]
+    return default  # puede ser None si tampoco había default
+
+
 def _parse_compose_to_config(compose_file: str, db_type: str) -> dict:
     """Extrae config de BD de un docker-compose.yml usando regex (sin parser YAML)."""
     import re
@@ -52,6 +93,7 @@ def _parse_compose_to_config(compose_file: str, db_type: str) -> dict:
     except Exception:
         return {}
 
+    dotenv = _load_dotenv(compose_file)
     container_port = _CONTAINER_PORTS.get(db_type)
     config: dict = {"db_type": db_type, "credentials": {}}
 
@@ -67,74 +109,74 @@ def _parse_compose_to_config(compose_file: str, db_type: str) -> dict:
         for var in env_vars:
             m = re.search(rf'{var}\s*[=:]\s*["\']?([^"\'\s\n]+)["\']?', content)
             if m:
-                config["credentials"][field] = m.group(1)
+                resolved = _resolve_compose_placeholder(m.group(1), dotenv)
+                if resolved:
+                    config["credentials"][field] = resolved
                 break
 
     return config
 
 
-def _pg_create_database(host: str, port: int, user: str, password: str, database: str) -> bool:
-    """
-    Crea la base de datos 'database' en PostgreSQL si no existe, usando el protocolo
-    wire de PostgreSQL directamente sobre un socket TCP, sin psycopg2 ni createdb.
+class _PgAuthError(Exception):
+    """Conexión TCP ok pero el servidor rechazó user/password (contraseña desincronizada)."""
 
-    Por qué wire protocol y no psycopg2/createdb:
-      - psycopg2 es una dependencia C que el usuario puede no tener instalada.
-      - "createdb" es un binario externo que puede no estar en PATH (ej. instalación mínima).
-      - El wire protocol de PostgreSQL 3.0 es estable desde PostgreSQL 7.4 y no cambia.
-        Implementarlo directamente elimina cualquier dependencia de terceros.
-    """
 
-    def _recv_exact(s, n):
-        # TCP puede entregar los datos en fragmentos más pequeños que n bytes.
-        # recv(n) no garantiza recibir exactamente n bytes, solo "hasta n".
-        # Acumulamos en un buffer hasta tener exactamente lo que necesitamos.
-        buf = b""
-        while len(buf) < n:
-            chunk = s.recv(n - len(buf))
-            if not chunk:
-                raise ConnectionError("closed")
-            buf += chunk
-        return buf
-
-    def _read_msg(s):
-        # Formato de mensaje del protocolo PostgreSQL 3.0:
-        #   1 byte  → tipo de mensaje ('R'=Auth, 'Z'=ReadyForQuery, 'E'=Error, etc.)
-        #   4 bytes → longitud total del mensaje (incluyendo estos 4 bytes, pero no el tipo)
-        #   N bytes → body (longitud - 4 bytes)
-        mt = s.recv(1)
-        if not mt:
+def _pg_recv_exact(s, n):
+    # TCP puede entregar los datos en fragmentos más pequeños que n bytes.
+    # recv(n) no garantiza recibir exactamente n bytes, solo "hasta n".
+    # Acumulamos en un buffer hasta tener exactamente lo que necesitamos.
+    buf = b""
+    while len(buf) < n:
+        chunk = s.recv(n - len(buf))
+        if not chunk:
             raise ConnectionError("closed")
-        length = struct.unpack("!I", _recv_exact(s, 4))[0]
-        body = _recv_exact(s, length - 4) if length > 4 else b""
-        return mt, body
+        buf += chunk
+    return buf
 
-    def _drain_to_ready(s):
-        # Después de enviar una query, el servidor manda varios mensajes antes de Z (ReadyForQuery).
-        # Tenemos que consumirlos todos o el próximo read leerá mensajes del comando anterior.
-        while True:
-            mt, _ = _read_msg(s)
-            if mt == b'Z':
-                return True
-            if mt == b'E':
-                return False
 
+def _pg_read_msg(s):
+    # Formato de mensaje del protocolo PostgreSQL 3.0:
+    #   1 byte  → tipo de mensaje ('R'=Auth, 'Z'=ReadyForQuery, 'E'=Error, etc.)
+    #   4 bytes → longitud total del mensaje (incluyendo estos 4 bytes, pero no el tipo)
+    #   N bytes → body (longitud - 4 bytes)
+    mt = s.recv(1)
+    if not mt:
+        raise ConnectionError("closed")
+    length = struct.unpack("!I", _pg_recv_exact(s, 4))[0]
+    body = _pg_recv_exact(s, length - 4) if length > 4 else b""
+    return mt, body
+
+
+def _pg_drain_to_ready(s):
+    # Después de enviar una query, el servidor manda varios mensajes antes de Z (ReadyForQuery).
+    # Tenemos que consumirlos todos o el próximo read leerá mensajes del comando anterior.
+    while True:
+        mt, _ = _pg_read_msg(s)
+        if mt == b'Z':
+            return True
+        if mt == b'E':
+            return False
+
+
+def _pg_connect(host: str, port: int, user: str, password: str, database: str = "postgres", timeout: int = 10):
+    """
+    Conecta y autentica contra PostgreSQL usando el wire protocol directamente sobre
+    un socket TCP, sin psycopg2 ni binarios externos (createdb, psql):
+      - psycopg2 es una dependencia C que el usuario puede no tener instalada.
+      - los binarios externos pueden no estar en PATH (ej. instalación mínima).
+      - el wire protocol de PostgreSQL 3.0 es estable desde PostgreSQL 7.4 y no cambia.
+    Devuelve el socket ya en estado ReadyForQuery. Lanza _PgAuthError si la conexión
+    TCP funcionó pero el servidor rechazó la autenticación (útil para distinguir
+    "contraseña desincronizada" de "postgres todavía no levantó").
+    """
+    s = socket.create_connection((host, port), timeout=timeout)
     try:
-        s = socket.create_connection((host, port), timeout=10)
-    except OSError:
-        return False
-
-    try:
-        # Startup message: conectar a la BD "postgres" (siempre existe) para poder
-        # ejecutar CREATE DATABASE. No conectamos directo a 'database' porque si no existe
-        # la conexión falla antes de poder crearla.
-        # Formato: longitud(4) + versión(4=196608=3.0) + "user\0<user>\0database\0postgres\0\0"
-        params = f"user\x00{user}\x00database\x00postgres\x00\x00".encode("utf-8")
+        # Formato: longitud(4) + versión(4=196608=3.0) + "user\0<user>\0database\0<database>\0\0"
+        params = f"user\x00{user}\x00database\x00{database}\x00\x00".encode("utf-8")
         s.sendall(struct.pack("!II", 8 + len(params), 196608) + params)
 
-        # Handshake de autenticación
         while True:
-            mt, body = _read_msg(s)
+            mt, body = _pg_read_msg(s)
             if mt == b'R':
                 auth_type = struct.unpack("!I", body[:4])[0]
                 if auth_type == 0:
@@ -153,7 +195,7 @@ def _pg_create_database(host: str, port: int, user: str, password: str, database
                 else:
                     # SCRAM-SHA-256, Kerberos, etc.: no implementados.
                     # En instalaciones portables siempre usamos md5 (configurado en pg_hba.conf).
-                    return False
+                    raise _PgAuthError("unsupported auth method")
             elif mt in (b'K', b'N', b'S'):
                 # K=BackendKeyData (PID+secret key para cancelar queries)
                 # N=NoticeResponse (advertencias no fatales)
@@ -161,17 +203,32 @@ def _pg_create_database(host: str, port: int, user: str, password: str, database
                 # Ninguno requiere respuesta; los ignoramos para llegar a Z.
                 continue
             elif mt == b'Z':
-                break  # ReadyForQuery → sesión establecida, podemos enviar queries
+                return s  # ReadyForQuery → sesión establecida, podemos enviar queries
             elif mt == b'E':
-                return False  # ErrorResponse durante auth (contraseña incorrecta, etc.)
+                raise _PgAuthError(body.decode("utf-8", "replace"))
+    except _PgAuthError:
+        s.close()
+        raise
+    except Exception:
+        s.close()
+        raise
 
+
+def _pg_create_database(host: str, port: int, user: str, password: str, database: str) -> bool:
+    """Crea 'database' si no existe. False en cualquier error (conexión, auth o query)."""
+    try:
+        s = _pg_connect(host, port, user, password, database="postgres")
+    except Exception:
+        return False
+
+    try:
         # Consultar pg_database en lugar de intentar CREATE DATABASE directamente,
         # porque CREATE DATABASE en una BD que existe lanza un error que rompe la sesión.
         q = f"SELECT 1 FROM pg_database WHERE datname='{database}'\x00".encode()
         s.sendall(b'Q' + struct.pack("!I", 4 + len(q)) + q)
         exists = False
         while True:
-            mt, _ = _read_msg(s)
+            mt, _ = _pg_read_msg(s)
             if mt == b'D':
                 exists = True  # DataRow → al menos una fila → la BD existe
             elif mt in (b'Z', b'E'):
@@ -180,7 +237,7 @@ def _pg_create_database(host: str, port: int, user: str, password: str, database
         if not exists:
             q = f'CREATE DATABASE "{database}"\x00'.encode()
             s.sendall(b'Q' + struct.pack("!I", 4 + len(q)) + q)
-            _drain_to_ready(s)
+            _pg_drain_to_ready(s)
 
         # Terminate (mensaje 'X') cierra la sesión de forma limpia desde el cliente.
         # Sin esto, el servidor marca la conexión como "abruptamente cerrada" en los logs,
@@ -285,6 +342,88 @@ class NativeManager:
 
     # ── Métodos de inicio de BD ───────────────────────────────────────────────
 
+    def _pg_reset_password(self, pg_data: str, data_dir: str, port: int,
+                            user: str, password: str, env: dict) -> bool:
+        """
+        Reconcilia el rol 'user' cuando pgdata ya estaba inicializado con otras
+        credenciales (ej. se corrigieron después del initdb original, pero initdb
+        solo corre una vez y nunca vuelve a tocar lo que quedó en disco). Cubre
+        tanto "el rol existe con otro password" como "el rol ni siquiera existe"
+        (initdb se corrió con -U distinto al usuario configurado ahora).
+        Se usa el modo single-user de postgres (`postgres --single`), que lee SQL
+        directo del data dir sin pasar por autenticación de red ni por el rol
+        bootstrap real, así no hace falta saber cuál era ese rol original.
+        """
+        pg_ctl = self._bin("pg_ctl", "postgresql")
+        postgres_bin = self._bin("postgres", "postgresql")
+        if not pg_ctl or not postgres_bin or not os.path.exists(pg_data):
+            return False
+
+        su = self._su_kwargs(data_dir)
+        log_file = os.path.join(data_dir, "postgresql.log")
+
+        # El modo single-user no admite conexiones concurrentes: hay que parar
+        # el servidor normal primero (si está corriendo) y volver a levantarlo después.
+        subprocess.run([pg_ctl, "-D", pg_data, "stop", "-m", "fast"],
+                        capture_output=True, encoding="utf-8", errors="replace", env=env, **su)
+
+        safe_ident = user.replace('"', '""')
+        safe_lit = user.replace("'", "''")
+        safe_pw = password.replace("'", "''")
+        sql = (
+            "DO $$ BEGIN "
+            f"IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{safe_lit}') THEN "
+            f"CREATE ROLE \"{safe_ident}\" LOGIN SUPERUSER PASSWORD '{safe_pw}'; "
+            "ELSE "
+            f"ALTER ROLE \"{safe_ident}\" WITH LOGIN PASSWORD '{safe_pw}'; "
+            "END IF; END $$;\n"
+        )
+        try:
+            r = subprocess.run(
+                [postgres_bin, "--single", "-D", pg_data, "postgres"],
+                input=sql, capture_output=True, encoding="utf-8", errors="replace",
+                env=env, timeout=30, **su
+            )
+            output = (r.stdout or "") + (r.stderr or "")
+            ok = r.returncode == 0 and "ERROR" not in output
+        except Exception:
+            ok = False
+
+        subprocess.run([pg_ctl, "-D", pg_data, "-l", log_file, "-o", f"-p {port}", "-w", "start"],
+                        capture_output=True, encoding="utf-8", errors="replace", env=env, **su)
+        # Esperar a que el puerto acepte conexiones antes de devolver el control:
+        # el caller llama _pg_create_database justo después de este reconcile, y
+        # sin esta espera esa llamada puede llegar antes de que postgres esté
+        # listo, fallando por timing y no por auth (el rol ya quedó bien creado).
+        for _ in range(30):
+            try:
+                with socket.create_connection(("localhost", port), timeout=1):
+                    break
+            except OSError:
+                time.sleep(1)
+        return ok
+
+    def _pg_reconcile_and_create(self, pg_data: str, data_dir: str, port: int,
+                                   user: str, password: str, database: str, env: dict,
+                                   attempts: int = 3) -> bool:
+        """
+        Reintenta reconciliar rol + crear BD varias veces en vez de una sola.
+        Un único intento alcanza en el caso normal (pgdata con credenciales
+        viejas), pero bajo presión de RAM (ej. arrancando un grupo grande de
+        servicios a la vez) el `postgres --single` del reconcile puede
+        colgarse/fallar por falta de recursos momentánea, no por un problema
+        real de auth. Reintentar con backoff le da tiempo al sistema a
+        liberar memoria (el arranque de los otros servicios termina, o el
+        propio OS libera standby list) antes de reportar error definitivo.
+        """
+        for intento in range(attempts):
+            if self._pg_reset_password(pg_data, data_dir, port, user, password, env) and \
+               _pg_create_database("localhost", port, user, password, database):
+                return True
+            if intento < attempts - 1:
+                time.sleep(2 * (intento + 1))
+        return False
+
     def _start_postgresql(self, data_dir: str, port: int,
                           user: str = "dbuser", password: str = "dbpass",
                           database: str = "postgres", **_) -> dict:
@@ -317,14 +456,20 @@ class NativeManager:
                 if running_port == port:
                     # Ya está vivo en el puerto correcto → nada que hacer salvo crear la BD si falta.
                     if database and database not in ("postgres", "template0", "template1"):
-                        _pg_create_database("localhost", port, user, password, database)
+                        if not _pg_create_database("localhost", port, user, password, database):
+                            # Falló (probablemente auth): pgdata ya estaba inicializado con un
+                            # password distinto al guardado ahora. Reconciliamos y reintentamos
+                            # en vez de reportar RUNNING con una contraseña desincronizada.
+                            if self._pg_reconcile_and_create(pg_data, data_dir, port, user, password, database, env):
+                                return {"ok": True}
+                            return {"ok": False, "error": f"PostgreSQL corriendo pero la autenticación para '{user}' falló (contraseña desincronizada con el pgdata ya inicializado)."}
                     return {"ok": True}
                 # Está vivo pero en un puerto distinto (ej. el usuario cambió db_port).
                 # Paramos con "fast" (rollback inmediato de transacciones) en lugar de "smart"
                 # (esperar a que todos los clientes se desconecten) para no bloquear indefinidamente.
                 subprocess.run(
                     [pg_ctl, "-D", pg_data, "stop", "-m", "fast"],
-                    capture_output=True, encoding="utf-8", env=env,
+                    capture_output=True, encoding="utf-8", errors="replace", env=env,
                     **self._su_kwargs(data_dir)
                 )
             except (ProcessLookupError, PermissionError):
@@ -352,7 +497,7 @@ class NativeManager:
             r = subprocess.run(
                 [initdb, "-D", pg_data, "-U", user or "postgres",
                  "--auth=md5", f"--pwfile={pwfile}"],
-                capture_output=True, encoding="utf-8", env=env, **su
+                capture_output=True, encoding="utf-8", errors="replace", env=env, **su
             )
             try:
                 os.remove(pwfile)
@@ -366,18 +511,41 @@ class NativeManager:
                 # de desarrollo esto es aceptable.
                 r = subprocess.run(
                     [initdb, "-D", pg_data, "-U", user or "postgres"],
-                    capture_output=True, encoding="utf-8", env=env, **su
+                    capture_output=True, encoding="utf-8", errors="replace", env=env, **su
                 )
                 if r.returncode != 0:
                     return {"ok": False, "error": f"initdb: {r.stderr.strip()}"}
 
-        # Arrancar el servidor en el puerto asignado
-        r = subprocess.run(
-            [pg_ctl, "-D", pg_data, "-l", log_file, "-o", f"-p {port}", "-w", "start"],
-            capture_output=True, encoding="utf-8", env=env,
-            **self._su_kwargs(data_dir)
-        )
-        output = r.stdout + r.stderr
+        # Arrancar el servidor en el puerto asignado.
+        # No usamos capture_output=True (pipes) para esta llamada: en Windows,
+        # "pg_ctl -w start" deja vivo al proceso postgres (+ workers) como hijo
+        # del propio pg_ctl, y esos procesos heredan el extremo de escritura de
+        # los pipes de stdout/stderr. Como el server nunca cierra ese handle,
+        # el read() de Python en subprocess.run() se queda esperando EOF para
+        # siempre, aunque pg_ctl ya haya terminado. Redirigir a un archivo real
+        # evita el problema (Python solo espera a que termine pg_ctl, no a que
+        # se cierren handles heredados por los hijos).
+        # En Windows, justo después de descomprimir binarios nuevos (o la primera
+        # vez que se tocan), el antivirus puede escanearlos y retener brevemente
+        # un lock sobre el archivo de log recién creado, haciendo que pg_ctl falle
+        # con "no se pudo abrir el archivo de log: Permission denied" aunque los
+        # permisos estén bien. Es transitorio: reintentar a los pocos ms alcanza.
+        pg_ctl_out = os.path.join(data_dir, ".pg_ctl_start.log")
+        output = ""
+        for intento in range(3):
+            with open(pg_ctl_out, "w", encoding="utf-8") as _lf:
+                r = subprocess.run(
+                    [pg_ctl, "-D", pg_data, "-l", log_file, "-o", f"-p {port}", "-w", "start"],
+                    stdout=_lf, stderr=subprocess.STDOUT, env=env,
+                    **self._su_kwargs(data_dir)
+                )
+            try:
+                output = open(pg_ctl_out, encoding="utf-8", errors="replace").read()
+            except Exception:
+                output = ""
+            if r.returncode == 0 or "no se pudo abrir el archivo de log" not in output.lower() and "could not open log file" not in output.lower():
+                break
+            time.sleep(0.8)
         if r.returncode == 0 or "server started" in output or "already running" in output:
             if database and database not in ("postgres", "template0", "template1"):
                 # Esperar que el puerto esté listo antes de crear la BD target
@@ -388,7 +556,9 @@ class NativeManager:
                     except OSError:
                         time.sleep(1)
                 if not _pg_create_database("localhost", port, user, password, database):
-                    return {"ok": False, "error": f"PostgreSQL arrancó pero no se pudo crear la base de datos '{database}'"}
+                    if self._pg_reconcile_and_create(pg_data, data_dir, port, user, password, database, env):
+                        return {"ok": True}
+                    return {"ok": False, "error": f"PostgreSQL arrancó pero no se pudo crear la base de datos '{database}' (autenticación falló incluso tras reconciliar la contraseña)"}
             return {"ok": True}
         return {"ok": False, "error": f"pg_ctl start: {output.strip()}"}
 
@@ -397,14 +567,57 @@ class NativeManager:
         pg_data = os.path.join(data_dir, "pgdata")
         if not os.path.isdir(pg_data) or not pg_ctl:
             return {"ok": True}
+        # Leer el PID del postmaster ANTES de pararlo: postmaster.pid se
+        # borra al pararse, y es el único enlace para encontrar a sus
+        # workers después — los workers (--forkaux/--forkbgworker/etc) NO
+        # llevan pg_data en su línea de comando, solo el postmaster la tiene.
+        postmaster_pid = None
+        pid_file = os.path.join(pg_data, "postmaster.pid")
+        if os.path.exists(pid_file):
+            try:
+                postmaster_pid = int(open(pid_file).readline().strip())
+            except Exception:
+                postmaster_pid = None
         r = subprocess.run(
             [pg_ctl, "-D", pg_data, "stop", "-m", "fast"],
-            capture_output=True, encoding="utf-8", env=self._proc_env("postgresql"),
+            capture_output=True, encoding="utf-8", errors="replace", env=self._proc_env("postgresql"),
             **self._su_kwargs(data_dir)
         )
+        print(f"[DEBUG pg_ctl stop] pg_data={pg_data} returncode={r.returncode} stdout={r.stdout!r} stderr={r.stderr!r}", flush=True)
         # "not running" también es éxito → ya estaba parado
         ok = r.returncode == 0 or "not running" in (r.stdout + r.stderr)
+        # pg_ctl stop manda la señal al postmaster y este a su vez para a sus
+        # workers (checkpointer, bgwriter, autovacuum, etc.) — en teoría basta.
+        # Pero si pg_ctl stop falla o queda a medias, esos workers quedan
+        # huérfanos sin puerto propio: down() no los vuelve a ver nunca
+        # porque no escuchan en ningún puerto rastreable. Barrida de
+        # seguridad: matar al postmaster (si sigue vivo) y a cualquier
+        # proceso cuyo ParentProcessId sea el postmaster — es el único
+        # vínculo real con los workers en Windows, matchear por ruta en la
+        # línea de comando no sirve porque los workers no la llevan.
+        if _IS_WINDOWS and postmaster_pid:
+            self._force_kill_children("postgres.exe", postmaster_pid)
         return {"ok": ok}
+
+    @staticmethod
+    def _force_kill_children(exe_name: str, parent_pid: int):
+        """Mata al proceso `parent_pid` (si sigue vivo) y a cualquier
+        `exe_name` cuyo ParentProcessId sea `parent_pid` — red de seguridad
+        para workers huérfanos que un stop normal (pg_ctl, taskkill por
+        puerto) no alcanza a ver porque no escuchan en ningún puerto propio
+        ni llevan la ruta de datos en su línea de comando."""
+        try:
+            ps_cmd = (
+                f"Get-CimInstance Win32_Process -Filter \"Name='{exe_name}'\" | "
+                f"Where-Object {{ $_.ProcessId -eq {parent_pid} -or $_.ParentProcessId -eq {parent_pid} }} | "
+                f"ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_cmd],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=15
+            )
+        except Exception:
+            pass
 
     def _start_mysql(self, data_dir: str, port: int,
                      user: str = "dbuser", password: str = "dbpass",
@@ -437,7 +650,7 @@ class NativeManager:
             r = subprocess.run(
                 [mysqld, "--initialize-insecure",
                  f"--datadir={mysql_data}"] + user_args,
-                capture_output=True, encoding="utf-8", env=env
+                capture_output=True, encoding="utf-8", errors="replace", env=env
             )
             if r.returncode != 0:
                 return {"ok": False, "error": f"mysqld --initialize: {r.stderr.strip()}"}
@@ -502,7 +715,7 @@ class NativeManager:
         if user and password:
             cmd.append("--auth")
 
-        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", env=env)
+        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", env=env)
         if r.returncode != 0 and "already running" not in (r.stdout + r.stderr):
             return {"ok": False, "error": f"mongod: {r.stderr.strip()}"}
         return {"ok": True}
@@ -551,7 +764,7 @@ class NativeManager:
         if password:
             cmd += ["--requirepass", password]
 
-        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", env=env)
+        r = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", env=env)
         if r.returncode != 0:
             return {"ok": False, "error": f"redis-server: {r.stderr.strip()}"}
         return {"ok": True}
@@ -606,7 +819,12 @@ class NativeManager:
         except Exception:
             return ""
 
-    def up(self, project_path: str, network_name: str, port_mapping: dict) -> dict:
+    def up(self, project_path: str, network_name: str, port_mapping: dict,
+           only_service: str | None = None) -> dict:
+        # only_service: existe solo para compatibilidad con la firma de
+        # DockerManager.up() (que arranca un único servicio de compose). En
+        # modo nativo/portable no hay compose — cada config corre un único
+        # proceso de BD, así que el parámetro se ignora.
         config = self._load_config(project_path)
 
         # Si no existe .orq_native.json, el proyecto puede tener un docker-compose.yml
@@ -624,6 +842,16 @@ class NativeManager:
                     db_type = self._detect_db_type_from_compose(cf)
                     if db_type:
                         config = _parse_compose_to_config(cf, db_type)
+                        if config:
+                            # Persistir a .orq_native.json: down() SOLO lee de ahí
+                            # (nunca re-parsea el compose.yml), así que si esto no
+                            # se guarda, down() siempre ve {} y hace un no-op
+                            # silencioso — "ok:true" sin parar nada de verdad.
+                            try:
+                                with open(self._config_path(project_path), "w", encoding="utf-8") as f:
+                                    json.dump(config, f, indent=2)
+                            except Exception:
+                                pass
                     break
 
         if not config or not config.get("db_type"):
