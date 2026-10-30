@@ -14,3 +14,8 @@ orquestador/storage/
 # Entornos
 .venv/
 venv/
+
+# Build desktop (PyInstaller) - binarios generados, no van al repo
+orquestador/build/
+orquestador/dist/
+orquestador/dist_staging*/
